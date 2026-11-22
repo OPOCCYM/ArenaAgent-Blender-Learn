@@ -17,6 +17,11 @@
 | `export_ue.py` | экспорт в FBX для Unreal Engine (масштаб 100, UCX_ коллизии, UV, имена) |
 | `ue_preview_export.py` | файловые карты → предварительные рендеры → экспорт FBX за один запуск |
 | `render_gallery.py` | HTTP-сервер галереи промежуточных рендеров (порт 8080) |
+| `serve_preview.py` | простой HTTP-сервер превью проекта (порт 4173) |
+| `export_obj.py` | экспорт сцены в OBJ/MTL для превью без Blender |
+| `render_obj_png.py` | software-рендер OBJ → PNG (NumPy/Pillow, не требует Blender) |
+| `tests/test_geometry.py` | автотесты валидации экспортированной геометрии |
+| `requirements-render.txt` | зависимости для software рендеринга (numpy, Pillow) |
 | `README_auto.md` | эта документация |
 
 ## Требования
@@ -213,3 +218,43 @@ python3 render_gallery.py
 `preview_all.png` — сводная сетка 3×2 со всеми кадрами на одном листе;
 собирается любым удобным способом (например, ImageMagick `montage`) после
 получения отдельных PNG.
+
+## Воркфлоу без Blender (software рендеринг)
+
+Когда Blender недоступен, можно всё равно получить PNG-превью геометрии и
+проверить её валидность без запуска Blender:
+
+```bash
+# 1. Установить зависимости для software рендеринга
+pip install -r requirements-render.txt
+
+# 2. Экспортировать сцену в OBJ/MTL (требуется Blender — один раз)
+blender -b -noaudio car_realistic.blend -P export_obj.py
+
+# 3. Рендерить превью из OBJ без Blender
+python3 render_obj_png.py exports/car_ue.obj
+
+# 4. Запустить сервер превью и открыть в браузере
+python3 serve_preview.py
+# http://localhost:4173 (или превью-порт Arena)
+```
+
+`render_obj_png.py` создаёт 4 ракурса (Front 3/4, Side, Rear 3/4, Cockpit)
+в `renders/car_ue_*.png`. Это software-превью, не Blender/Cycles рендер —
+оно полезно для быстрой проверки пропорций и топологии, но не заменяет
+финальные Cycles-кадры.
+
+`serve_preview.py` раздаёт файлы проекта на порту 4173 с отключённым кэшем,
+чтобы обновлённые PNG сразу появлялись в браузере.
+
+## Автотесты геометрии
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+`tests/test_geometry.py` проверяет экспортированный `exports/car_ue.obj`:
+существование файлов, отсутствие NaN/Inf, корректность индексов граней,
+отсутствие вырожденных граней, габариты модели close к реальным (5.00 × 1.872 × 1.456 м),
+соответствие используемых материалов определённым в MTL.
+Тест пропускается, если OBJ ещё не сгенерирован.
