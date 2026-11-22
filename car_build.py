@@ -278,12 +278,64 @@ def _bsdf_base(m, color, metallic, roughness, coat=0.0, coat_rough=0.05):
     return bsdf
 
 
+def load_image(name, filename):
+    """Загружает файл карты из maps/, если он существует; иначе None."""
+    path = os.path.join('maps', filename)
+    if not os.path.exists(path):
+        return None
+    if name in bpy.data.images:
+        return bpy.data.images[name]
+    return bpy.data.images.load(path)
+
+
+def apply_normal_map(material, image_name, filename):
+    """Подключает Image Texture + NormalMap к входу Normal Principled BSDF."""
+    img = load_image(image_name, filename)
+    if img is None:
+        return
+    nt = material.node_tree
+    nodes = nt.nodes
+    links = nt.links
+    bsdf = nodes.get('Principled BSDF')
+    tex = nodes.new('ShaderNodeTexImage')
+    tex.name = image_name
+    tex.label = image_name
+    tex.image = img
+    tex.extension = 'REPEAT'
+    tex.interpolation = 'Linear'
+    nm = nodes.new('ShaderNodeNormalMap')
+    nm.name = image_name + '_NormalMap'
+    nm.space = 'TANGENT'
+    links.new(tex.outputs['Color'], nm.inputs['Color'])
+    links.new(nm.outputs['Normal'], bsdf.inputs['Normal'])
+
+
+def apply_roughness_map(material, image_name, filename):
+    """Подключает Image Texture к Roughness Principled BSDF (перекрывает процедурное значение)."""
+    img = load_image(image_name, filename)
+    if img is None:
+        return
+    nt = material.node_tree
+    nodes = nt.nodes
+    links = nt.links
+    bsdf = nodes.get('Principled BSDF')
+    tex = nodes.new('ShaderNodeTexImage')
+    tex.name = image_name
+    tex.label = image_name
+    tex.image = img
+    tex.extension = 'REPEAT'
+    tex.interpolation = 'Linear'
+    links.new(tex.outputs['Color'], bsdf.inputs['Roughness'])
+
+
 def mat_paint():
     """CarPaint_MetallicBlue (0.055, 0.115, 0.280), Metallic 0.62, Roughness 0.26,
-    Coat 1.0/0.03, «апельсиновая корка» —注释 (процедурно)."""
+    Coat 1.0/0.03, «апельсиновая корка» (процедурно + файловые карты normal/roughness)."""
     m = bpy.data.materials.new('CarPaint_MetallicBlue')
     m.use_nodes = True
     _bsdf_base(m, (0.055, 0.115, 0.280), 0.62, 0.26, coat=1.0, coat_rough=0.03)
+    apply_normal_map(m, 'Normal_Body', 'normal_body.png')
+    apply_roughness_map(m, 'Roughness_Body', 'roughness_body.png')
     return m
 
 
@@ -374,6 +426,8 @@ def mat_rubber():
     nt.links.new(mix.outputs['Color'], ramp.inputs['Fac'])
     nt.links.new(ramp.outputs['Color'], bsdf.inputs['Roughness'])
     nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
+    # файловые карты шины (если сгенерированы bake_maps.py)
+    apply_normal_map(m, 'Normal_Tire', 'normal_tire.png')
     return m
 
 
@@ -406,6 +460,8 @@ def mat_leather(name, color, scale=9.0, roughness=0.65):
     nt.links.new(noise.outputs['Fac'], mix_col.inputs['Color2'])
     nt.links.new(mix_col.outputs['Color'], bsdf.inputs['Base Color'])
     nt.links.new(wave.outputs['Fac'], bsdf.inputs['Roughness'])
+    # файловые карты кожи (если сгенерированы bake_maps.py)
+    apply_normal_map(m, 'Normal_Leather', 'normal_leather.png')
     nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
     return m
 
