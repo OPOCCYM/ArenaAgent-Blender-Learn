@@ -149,11 +149,82 @@ def cleanup(ob, dist=5e-5):
     me.update()
 
 
-def bmesh_to_object(name, bm, material=None, smooth=True, collection=None,
-                    auto_smooth_deg=30.0):
-    """Конвертирует BMesh в объект сцены, настраивает сглаживание (Blender 4.2 API)
-    и выполняет очистку геометрии."""
+def _bevel_and_clean_bm(bm, bevel_width=0.0, bevel_segments=2, angle_deg=38.0):
+    """Снимает аккуратную фаску с острых рёбер (сохраняя 100% manifold и 0 n-gon)."""
+    if bevel_width > 0.0:
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        thr = math.radians(angle_deg)
+        sharp_edges = [
+            e for e in bm.edges
+            if len(e.link_faces) == 2 and e.calc_face_angle(0.0) > thr
+        ]
+        if sharp_edges:
+            bmesh.ops.bevel(
+                bm,
+                geom=sharp_edges,
+                offset=bevel_width,
+                offset_type='OFFSET',
+                segments=bevel_segments,
+                profile=0.55,
+                affect='EDGES',
+                clamp_overlap=True,
+            )
+            ngons = [f for f in bm.faces if len(f.verts) > 4]
+            if ngons:
+                bmesh.ops.triangulate(bm, faces=ngons)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=5e-5)
+    degen = [f for f in bm.faces if len(f.verts) < 3 or f.calc_area() < 1e-12]
+    if degen:
+        bmesh.ops.delete(bm, geom=degen, context='FACES')
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+
+def apply_catmull_clark(ob, levels=1, auto_smooth_deg=55.0):
+    """Запекает Catmull-Clark Subdivision в меш ob.data (чистые квады, 0 дефектов QA)."""
+    if levels <= 0 or ob.type != 'MESH':
+        return ob
+    mod = ob.modifiers.new(name='Subsurf_Bake', type='SUBSURF')
+    mod.subdivision_type = 'CATMULL_CLARK'
+    mod.levels = levels
+    mod.render_levels = levels
+    mod.uv_smooth = 'PRESERVE_BOUNDARIES'
+    deps = bpy.context.evaluated_depsgraph_get()
+    ob_eval = ob.evaluated_get(deps)
+    old_mesh = ob.data
+    new_mesh = bpy.data.meshes.new_from_object(ob_eval)
+    ob.modifiers.remove(mod)
+    ob.data = new_mesh
+    bpy.data.meshes.remove(old_mesh)
+    new_mesh.name = ob.name
+
+    bm = bmesh.new()
+    bm.from_mesh(new_mesh)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=5e-5)
+    degen = [f for f in bm.faces if len(f.verts) < 3 or f.calc_area() < 1e-12]
+    if degen:
+        bmesh.ops.delete(bm, geom=degen, context='FACES')
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    max_angle = math.radians(auto_smooth_deg)
+    for f in bm.faces:
+        f.smooth = True
+    for e in bm.edges:
+        if len(e.link_faces) == 2:
+            e.smooth = e.calc_face_angle(0.0) <= max_angle
+        else:
+            e.smooth = True
+    bm.to_mesh(new_mesh)
+    bm.free()
+    new_mesh.update()
+    return ob
+
+
+def bmesh_to_object(name, bm, material=None, smooth=True, collection=None,
+                    auto_smooth_deg=48.0, bevel=0.0, bevel_segs=2,
+                    bevel_angle_deg=38.0, subsurf=0):
+    """Конвертирует BMesh в объект сцены, опционально снимает фаску по острым рёбрам,
+    применяет Catmull-Clark Subdivision (subsurf) и настраивает сглаживание (Blender 4.2 API)."""
+    _bevel_and_clean_bm(bm, bevel_width=bevel, bevel_segments=bevel_segs,
+                        angle_deg=bevel_angle_deg)
     if smooth:
         max_angle = math.radians(auto_smooth_deg)
         for f in bm.faces:
@@ -171,6 +242,8 @@ def bmesh_to_object(name, bm, material=None, smooth=True, collection=None,
     if material is not None:
         ob.data.materials.append(material)
     cleanup(ob, 5e-5)
+    if subsurf > 0:
+        apply_catmull_clark(ob, levels=subsurf, auto_smooth_deg=max(auto_smooth_deg, 55.0))
     return ob
 
 
@@ -292,18 +365,43 @@ def _bsdf_base(m, color, metallic, roughness, coat=0.0, coat_rough=0.05):
 
 
 def mat_paint():
-    """CarPaint_MetallicBlue: металлик + лак (Coat) + лёгкий процедурный микрорельеф."""
+    """CarPaint_MetallicBlue: двухслойный автолак Volvo Denim Blue Metallic
+    с угловым переливом (Layer Weight flop), микрохлопьями металлика и кристальным лаком."""
     m = bpy.data.materials.new('CarPaint_MetallicBlue')
     m.use_nodes = True
     nt = m.node_tree
-    bsdf = _bsdf_base(m, (0.055, 0.115, 0.280), 0.62, 0.26, coat=1.0, coat_rough=0.03)
+    bsdf = _bsdf_base(m, (0.042, 0.102, 0.255), 0.78, 0.21, coat=1.0, coat_rough=0.016)
+    bsdf.inputs['Coat IOR'].default_value = 1.56
+
+    # Угловой цветовой перелив металлика (flop): глубже в лоб, сапфировый на касательных
+    lw = nt.nodes.new('ShaderNodeLayerWeight')
+    lw.inputs['Blend'].default_value = 0.28
+    _, fac_in, a_in, b_in, col_out = _new_mix_rgba(nt, blend_type='MIX', fac=0.5)
+    a_in.default_value = (0.030, 0.078, 0.215, 1.0)
+    b_in.default_value = (0.095, 0.195, 0.410, 1.0)
+    nt.links.new(lw.outputs['Facing'], fac_in)
+    nt.links.new(col_out, bsdf.inputs['Base Color'])
+
+    # Тончайшие металлические хлопья (микро-вариация шероховатости под лаком)
     tc = nt.nodes.new('ShaderNodeTexCoord')
+    flakes = nt.nodes.new('ShaderNodeTexVoronoi')
+    flakes.inputs['Scale'].default_value = 1600.0
+    flake_map = nt.nodes.new('ShaderNodeMapRange')
+    flake_map.inputs['From Min'].default_value = 0.0
+    flake_map.inputs['From Max'].default_value = 1.0
+    flake_map.inputs['To Min'].default_value = 0.17
+    flake_map.inputs['To Max'].default_value = 0.26
+    nt.links.new(tc.outputs['Object'], flakes.inputs['Vector'])
+    nt.links.new(flakes.outputs['Distance'], flake_map.inputs['Value'])
+    nt.links.new(flake_map.outputs['Result'], bsdf.inputs['Roughness'])
+
+    # Едва заметная «шагрень» на верхнем прозрачном слое лака
     noise = nt.nodes.new('ShaderNodeTexNoise')
-    noise.inputs['Scale'].default_value = 420.0
-    noise.inputs['Detail'].default_value = 3.0
+    noise.inputs['Scale'].default_value = 380.0
+    noise.inputs['Detail'].default_value = 2.5
     bump = nt.nodes.new('ShaderNodeBump')
-    bump.inputs['Strength'].default_value = 0.015
-    bump.inputs['Distance'].default_value = 0.001
+    bump.inputs['Strength'].default_value = 0.007
+    bump.inputs['Distance'].default_value = 0.0008
     nt.links.new(tc.outputs['Object'], noise.inputs['Vector'])
     nt.links.new(noise.outputs['Fac'], bump.inputs['Height'])
     nt.links.new(bump.outputs['Normal'], bsdf.inputs['Coat Normal'])
@@ -317,26 +415,47 @@ def mat_white(color=(0.9, 0.9, 0.9), roughness=0.9):
     return m
 
 
+def mat_floor():
+    """Сатиновый графитовый пол автостудии с мягким отражением кузова и колёс."""
+    m = bpy.data.materials.new('Studio_Floor')
+    m.use_nodes = True
+    nt = m.node_tree
+    bsdf = _bsdf_base(m, (0.145, 0.152, 0.168), 0.04, 0.24, coat=0.35, coat_rough=0.14)
+    tc = nt.nodes.new('ShaderNodeTexCoord')
+    noise = nt.nodes.new('ShaderNodeTexNoise')
+    noise.inputs['Scale'].default_value = 12.0
+    noise.inputs['Detail'].default_value = 4.0
+    rmap = nt.nodes.new('ShaderNodeMapRange')
+    rmap.inputs['To Min'].default_value = 0.20
+    rmap.inputs['To Max'].default_value = 0.30
+    bump = nt.nodes.new('ShaderNodeBump')
+    bump.inputs['Strength'].default_value = 0.012
+    bump.inputs['Distance'].default_value = 0.002
+    nt.links.new(tc.outputs['Object'], noise.inputs['Vector'])
+    nt.links.new(noise.outputs['Fac'], rmap.inputs['Value'])
+    nt.links.new(rmap.outputs['Result'], bsdf.inputs['Roughness'])
+    nt.links.new(noise.outputs['Fac'], bump.inputs['Height'])
+    nt.links.new(bump.outputs['Normal'], bsdf.inputs['Normal'])
+    return m
+
+
 def mat_glass():
-    """Glass_Window: Transparent + Glossy по Layer Weight (без Transmission),
-    тонировка 0.58, Roughness 0.065."""
+    """Glass_Window: тонированное автомобильное стекло с чётким зеркальным отражением
+    по Fresnel (IOR 1.52) и естественной прозрачностью салона."""
     m = bpy.data.materials.new('Glass_Window')
     m.use_nodes = True
     nt = m.node_tree
     nt.nodes.clear()
     out = nt.nodes.new('ShaderNodeOutputMaterial')
     trans = nt.nodes.new('ShaderNodeBsdfTransparent')
-    trans.inputs['Color'].default_value = (0.58, 0.63, 0.68, 1.0)
+    trans.inputs['Color'].default_value = (0.34, 0.40, 0.44, 1.0)
     gloss = nt.nodes.new('ShaderNodeBsdfGlossy')
-    gloss.inputs['Roughness'].default_value = 0.065
-    _, _, a_in, b_in, res_out = _new_mix_rgba(nt, blend_type='MIX', fac=0.58)
-    a_in.default_value = (0.30, 0.40, 0.55, 1.0)
-    b_in.default_value = (0.55, 0.70, 0.90, 1.0)
-    nt.links.new(res_out, gloss.inputs['Color'])
-    lw = nt.nodes.new('ShaderNodeLayerWeight')
-    lw.inputs['Blend'].default_value = 0.35
+    gloss.inputs['Color'].default_value = (0.88, 0.93, 0.98, 1.0)
+    gloss.inputs['Roughness'].default_value = 0.016
+    fres = nt.nodes.new('ShaderNodeFresnel')
+    fres.inputs['IOR'].default_value = 1.54
     mix = nt.nodes.new('ShaderNodeMixShader')
-    nt.links.new(lw.outputs['Fresnel'], mix.inputs['Fac'])
+    nt.links.new(fres.outputs['Fac'], mix.inputs['Fac'])
     nt.links.new(trans.outputs[0], mix.inputs[1])
     nt.links.new(gloss.outputs[0], mix.inputs[2])
     nt.links.new(mix.outputs[0], out.inputs['Surface'])
@@ -344,17 +463,19 @@ def mat_glass():
 
 
 def mat_lens():
-    """Lens_Clear: Transparent + Glossy по Fresnel (IOR 1.52) для фар и фонарей."""
+    """Lens_Clear: прозрачный поликарбонат фар и фонарей по Fresnel (IOR 1.54)."""
     m = bpy.data.materials.new('Lens_Clear')
     m.use_nodes = True
     nt = m.node_tree
     nt.nodes.clear()
     out = nt.nodes.new('ShaderNodeOutputMaterial')
     trans = nt.nodes.new('ShaderNodeBsdfTransparent')
+    trans.inputs['Color'].default_value = (0.94, 0.96, 0.98, 1.0)
     gloss = nt.nodes.new('ShaderNodeBsdfGlossy')
-    gloss.inputs['Roughness'].default_value = 0.045
+    gloss.inputs['Color'].default_value = (0.96, 0.98, 1.0, 1.0)
+    gloss.inputs['Roughness'].default_value = 0.015
     fres = nt.nodes.new('ShaderNodeFresnel')
-    fres.inputs['IOR'].default_value = 1.52
+    fres.inputs['IOR'].default_value = 1.54
     mix = nt.nodes.new('ShaderNodeMixShader')
     nt.links.new(fres.outputs['Fac'], mix.inputs['Fac'])
     nt.links.new(trans.outputs[0], mix.inputs[1])
@@ -494,25 +615,80 @@ def mat_emission(name, strength, color=(1.0, 1.0, 1.0)):
 
 
 def mat_carbon():
+    """Матовый/сатиновый конструкционный автопластик (диффузор, подкрылки, жабо, моторный отсек)."""
     m = bpy.data.materials.new('Carbon_Trim')
     m.use_nodes = True
-    _bsdf_base(m, (0.10, 0.10, 0.11), 0.78, 0.32)
+    nt = m.node_tree
+    bsdf = _bsdf_base(m, (0.024, 0.026, 0.030), 0.06, 0.44)
+    tc = nt.nodes.new('ShaderNodeTexCoord')
+    noise = nt.nodes.new('ShaderNodeTexNoise')
+    noise.inputs['Scale'].default_value = 260.0
+    noise.inputs['Detail'].default_value = 4.0
+    bump = nt.nodes.new('ShaderNodeBump')
+    bump.inputs['Strength'].default_value = 0.024
+    bump.inputs['Distance'].default_value = 0.0015
+    nt.links.new(tc.outputs['Object'], noise.inputs['Vector'])
+    nt.links.new(noise.outputs['Fac'], bump.inputs['Height'])
+    nt.links.new(bump.outputs['Normal'], bsdf.inputs['Normal'])
+    return m
+
+
+def mat_piano_black():
+    """Чёрный рояльный лак (стойки B, окантовка решётки, внутренние отражатели фар)."""
+    m = bpy.data.materials.new('Piano_Black')
+    m.use_nodes = True
+    _bsdf_base(m, (0.008, 0.009, 0.011), 0.06, 0.055, coat=1.0, coat_rough=0.012)
     return m
 
 
 def mat_chrome():
-    """Хромированная сталь (штоки газовых лифтов, тормозные диски, ручки дверей)."""
+    """Зеркальный хром (решётка, выхлоп, ручки дверей, штоки газовых лифтов)."""
     m = bpy.data.materials.new('Chrome_Steel')
     m.use_nodes = True
-    _bsdf_base(m, (0.86, 0.88, 0.91), 0.98, 0.12)
+    _bsdf_base(m, (0.92, 0.94, 0.96), 1.0, 0.05)
     return m
 
 
 def mat_alloy():
-    """Серебристый сплав для многоспицевых колёсных дисков."""
+    """Фрезерованный серебристый алюминий (диски, впуск, КПП, распорка, усилитель бампера)."""
     m = bpy.data.materials.new('Alloy_Silver')
     m.use_nodes = True
-    _bsdf_base(m, (0.72, 0.74, 0.77), 0.92, 0.22, coat=0.4, coat_rough=0.08)
+    bsdf = _bsdf_base(m, (0.78, 0.80, 0.84), 0.95, 0.14, coat=0.5, coat_rough=0.04)
+    bsdf.inputs['Anisotropic'].default_value = 0.30
+    return m
+
+
+def mat_brake_disc():
+    """Шлифованная сталь тормозного диска с концентрической проточкой."""
+    m = bpy.data.materials.new('Brake_Disc_Steel')
+    m.use_nodes = True
+    nt = m.node_tree
+    bsdf = _bsdf_base(m, (0.62, 0.64, 0.67), 0.94, 0.26)
+    tc = nt.nodes.new('ShaderNodeTexCoord')
+    wave = nt.nodes.new('ShaderNodeTexWave')
+    wave.wave_type = 'RINGS'
+    wave.rings_direction = 'Y'
+    wave.inputs['Scale'].default_value = 55.0
+    wave.inputs['Detail'].default_value = 3.0
+    rmap = nt.nodes.new('ShaderNodeMapRange')
+    rmap.inputs['To Min'].default_value = 0.18
+    rmap.inputs['To Max'].default_value = 0.34
+    bump = nt.nodes.new('ShaderNodeBump')
+    bump.inputs['Strength'].default_value = 0.04
+    bump.inputs['Distance'].default_value = 0.0005
+    nt.links.new(tc.outputs['Object'], wave.inputs['Vector'])
+    nt.links.new(wave.outputs['Fac'], rmap.inputs['Value'])
+    nt.links.new(rmap.outputs['Result'], bsdf.inputs['Roughness'])
+    nt.links.new(wave.outputs['Fac'], bump.inputs['Height'])
+    nt.links.new(bump.outputs['Normal'], bsdf.inputs['Normal'])
+    return m
+
+
+def mat_tail_housing():
+    """Тёмно-рубиновый лаковый корпус заднего фонаря под прозрачной линзой."""
+    m = bpy.data.materials.new('Tail_Housing_Red')
+    m.use_nodes = True
+    _bsdf_base(m, (0.16, 0.008, 0.010), 0.12, 0.12, coat=1.0, coat_rough=0.02)
     return m
 
 
@@ -520,7 +696,7 @@ def mat_caliper():
     """Спортивный красный металлик для тормозных суппортов."""
     m = bpy.data.materials.new('Caliper_Red')
     m.use_nodes = True
-    _bsdf_base(m, (0.58, 0.04, 0.04), 0.45, 0.24, coat=0.9, coat_rough=0.05)
+    _bsdf_base(m, (0.62, 0.032, 0.032), 0.55, 0.20, coat=1.0, coat_rough=0.03)
     return m
 
 
@@ -530,18 +706,22 @@ def make_materials():
         'glass': mat_glass(),
         'lens': mat_lens(),
         'rubber': mat_rubber(),
-        'leather': mat_leather('Leather_Seat', (0.042, 0.038, 0.037), scale=9.0, roughness=0.65),
+        'leather': mat_leather('Leather_Seat', (0.042, 0.038, 0.037), scale=9.0, roughness=0.62),
         'carpet': mat_leather('Carpet', (0.025, 0.022, 0.020), scale=42.0, roughness=0.85),
         'headliner': mat_leather('Headliner_Fabric', (0.07, 0.065, 0.06),
                                  scale=55.0, roughness=0.90),
-        'headlight': mat_emission('Headlight_Light', 0.95, (1.0, 0.96, 0.88)),
-        'drl': mat_emission('DRL_Light', 2.20, (0.96, 0.98, 1.0)),
-        'tail': mat_emission('Tail_Light', 1.15, (0.98, 0.08, 0.09)),
+        'headlight': mat_emission('Headlight_Light', 1.4, (1.0, 0.96, 0.88)),
+        'drl': mat_emission('DRL_Light', 4.2, (0.94, 0.97, 1.0)),
+        'tail': mat_emission('Tail_Light', 3.4, (1.0, 0.055, 0.045)),
+        'tail_housing': mat_tail_housing(),
         'carbon': mat_carbon(),
+        'piano_black': mat_piano_black(),
         'chrome': mat_chrome(),
         'alloy': mat_alloy(),
+        'brake_disc': mat_brake_disc(),
         'caliper': mat_caliper(),
         'white': mat_white(),
+        'floor': mat_floor(),
     }
 
 
@@ -666,7 +846,7 @@ def build_body(mats, collection):
             ))
 
     # Замыкание кормы (-X): 3D-купол по суперэллипсу от TIP_R -> X_MIN
-    n_rings = 7
+    n_rings = 10
     prev = [verts[k] for k in range(vcount)]
     base_loop = loops[0]
     zm_r = 0.5 * (ZB(xs[0]) + ZR(xs[0]))
@@ -695,8 +875,10 @@ def build_body(mats, collection):
         kn = (k + 1) % vcount
         bm.faces.new((center_f, verts[last_base + kn], verts[last_base + k]))
 
-    smooth_laplacian(bm, iters=1, factor=0.18)
-    ob = bmesh_to_object('Body', bm, material=mats['paint'], smooth=True, collection=collection)
+    smooth_laplacian(bm, iters=1, factor=0.14)
+    ob = bmesh_to_object('Body', bm, material=mats['paint'], smooth=True,
+                         collection=collection, auto_smooth_deg=55.0,
+                         bevel=0.003, bevel_segs=2, subsurf=1)
     uv_top(ob)
     return ob
 
@@ -734,7 +916,7 @@ def build_front_structure_and_panels(body_ob, mats, collection):
     add_box(bm_sf, 1.24, 1.34, -0.53, 0.53, 0.268, 0.320)
     add_box(bm_sf, 1.92, 2.02, -0.53, 0.53, 0.268, 0.320)
     sf_ob = bmesh_to_object('Front_Subframe', bm_sf, material=mats['carbon'],
-                            smooth=True, collection=collection)
+                            smooth=True, collection=collection, bevel=0.003)
     uv_box(sf_ob, scale=2.0)
     _attach(sf_ob)
 
@@ -742,7 +924,7 @@ def build_front_structure_and_panels(body_ob, mats, collection):
     bm_cb = bmesh.new()
     add_box(bm_cb, 2.318, 2.375, -0.60, 0.60, 0.325, 0.435)
     cb_ob = bmesh_to_object('Crash_Beam', bm_cb, material=mats['alloy'],
-                            smooth=True, collection=collection)
+                            smooth=True, collection=collection, bevel=0.004)
     uv_box(cb_ob, scale=4.0)
     _attach(cb_ob)
 
@@ -778,7 +960,7 @@ def build_front_structure_and_panels(body_ob, mats, collection):
         # Резиновый отбойник капота на переднем конце брызговика
         _add_z_cylinder(bm_ap, 0.014, 0.77, 0.805, seg=12, center_xy=(2.08, side * 0.54))
         ap_ob = bmesh_to_object(f'Fender_Apron_{label}', bm_ap, material=mats['carbon'],
-                                smooth=True, collection=collection)
+                                smooth=True, collection=collection, bevel=0.003)
         uv_box(ap_ob, scale=3.0)
         _attach(ap_ob)
 
@@ -796,7 +978,7 @@ def build_front_structure_and_panels(body_ob, mats, collection):
     # Центральный замок капота на верхней балке
     add_box(bm_rs, 2.16, 2.24, -0.055, 0.055, 0.787, 0.818)
     rs_ob = bmesh_to_object('Radiator_Support', bm_rs, material=mats['carbon'],
-                            smooth=True, collection=collection)
+                            smooth=True, collection=collection, bevel=0.003)
     uv_box(rs_ob, scale=3.0)
     _attach(rs_ob)
 
@@ -811,15 +993,15 @@ def build_front_structure_and_panels(body_ob, mats, collection):
     for wy0, wy1 in ((-0.58, -0.04), (0.04, 0.58)):
         add_box(bm_cw, 0.99, 1.015, wy0, wy1, z_cw + 0.004, z_cw + 0.018)
     cw_ob = bmesh_to_object('Cowl_Panel', bm_cw, material=mats['carbon'],
-                            smooth=True, collection=collection)
+                            smooth=True, collection=collection, bevel=0.0025)
     uv_box(cw_ob, scale=4.0)
     _attach(cw_ob)
 
     # 6. ОТДЕЛЬНЫЕ передние крылья (Fender_Front_L / Fender_Front_R) с вырезом арки и фланцем
-    # Плотный набор X-сечений: сгущение в зоне арки колеса и диагонального стыка с бампером
+    # Плотный набор X-сечений: плавное сгущение на переходе порог -> арка и к стыку с бампером
     fender_xs = sorted({
-        FENDER_X_REAR, 0.98, 1.06, 1.14, 1.19,
-        *[1.212 + (1.988 - 1.212) * k / 20.0 for k in range(21)],
+        FENDER_X_REAR, 0.96, 1.01, 1.07, 1.13, 1.175, 1.200, 1.212, 1.225,
+        *[1.24 + (1.988 - 1.24) * k / 24.0 for k in range(25)],
         2.02, 2.08, 2.15, 2.22, FENDER_X_FRONT,
     })
     for label, side in (('L', 1.0), ('R', -1.0)):
@@ -839,11 +1021,15 @@ def build_front_structure_and_panels(body_ob, mats, collection):
             # 0..6 — борт от нижней кромки/арки до плеча BELT;
             # 7..9 — скруглённый верхний гребень крыла к линии капота;
             # 10..11 — загнутый внутрь монтажный фланец крыла (виден при открытом капоте!)
+            t_sill = clamp((1.24 - x) / 0.18, 0.0, 1.0)
+            t_sill = t_sill * t_sill * (3.0 - 2.0 * t_sill)
             profile = []
             for j in range(7):
                 u = j / 6.0
                 zz = zb_f + (belt_x - zb_f) * u
-                yy = side_surface_y(x, zz)
+                # Плавный подгиб нижней юбки порога внутрь без резкого скачка у арки
+                sill_tuck = 1.0 - 0.022 * t_sill * ((1.0 - u) ** 2.4)
+                yy = side_surface_y(x, zz) * sill_tuck
                 profile.append((yy, zz))
             for k in range(1, 4):
                 u = k / 3.0
@@ -870,14 +1056,15 @@ def build_front_structure_and_panels(body_ob, mats, collection):
             inner_pts.append(row_in)
         _add_thick_grid(bm_f, outer_pts, inner_pts)
         f_ob = bmesh_to_object(f'Fender_Front_{label}', bm_f, material=mats['paint'],
-                               smooth=True, collection=collection)
+                               smooth=True, collection=collection, auto_smooth_deg=55.0,
+                               bevel=0.003, bevel_segs=2, subsurf=1)
         uv_box(f_ob, scale=1.2)
         _attach(f_ob)
 
     # 7. ОТДЕЛЬНЫЙ передний бампер (Front_Bumper): носовой модуль + левое/правое боковые крылышки
     bm_bmp = bmesh.new()
     # 7a. Основной носовой модуль от FRONT_BUMPER_X до X_MAX (с точным 3D-куполом носа)
-    nx_b = 10
+    nx_b = 12
     b_xs = [FRONT_BUMPER_X + (TIP_F - FRONT_BUMPER_X) * i / (nx_b - 1) for i in range(nx_b)]
     b_loops = [body_section(x) for x in b_xs]
     vc = len(b_loops[0])
@@ -903,7 +1090,7 @@ def build_front_structure_and_panels(body_ob, mats, collection):
         bm_bmp.faces.new((back_c, b_verts[k], b_verts[kn]))
 
     # Передний 3D-купол бампера по суперэллипсу от TIP_F -> X_MAX
-    n_rings_b = 7
+    n_rings_b = 10
     prev_b = [b_verts[(nx_b - 1) * vc + k] for k in range(vc)]
     base_b = b_loops[-1]
     zm_bf = 0.5 * (ZB(TIP_F) + ZR(TIP_F))
@@ -926,24 +1113,23 @@ def build_front_structure_and_panels(body_ob, mats, collection):
 
     # 7b. Левое и правое боковые крылышки бампера (плавно заходят в носовой модуль без ступеньки)
     wing_xs = [
-        FRONT_BUMPER_WING_X + (FRONT_BUMPER_X + 0.030 - FRONT_BUMPER_WING_X) * i / 9.0
-        for i in range(10)
+        FRONT_BUMPER_WING_X + (FRONT_BUMPER_X + 0.042 - FRONT_BUMPER_WING_X) * i / 11.0
+        for i in range(12)
     ]
     for side in (1.0, -1.0):
         w_out = []
         w_in = []
         for x in wing_xs:
-            # Нижняя кромка крылышка совпадает с линией порога и плавно подгибается к носу
-            t_w = clamp((x - FRONT_BUMPER_WING_X) / 0.32, 0.0, 1.0)
-            z_lo = ZB(x) + 0.034 + 0.018 * (t_w ** 1.5)
-            z_hi = fender_bumper_seam_z(min(x, FENDER_X_FRONT)) - 0.006
+            t_w = clamp((x - FRONT_BUMPER_WING_X) / 0.34, 0.0, 1.0)
+            z_lo = ZB(x) + 0.042 + 0.010 * (t_w ** 1.4)
+            z_hi = fender_bumper_seam_z(min(x, FENDER_X_FRONT)) - 0.005
             row_o = []
             row_i = []
-            for j in range(6):
-                u = j / 5.0
+            for j in range(7):
+                u = j / 6.0
                 zz = z_lo + (z_hi - z_lo) * u
-                # Мягкий подгиб нижней юбки бампера (без острой угловатой ступеньки)
-                chin_tuck = 1.0 - 0.055 * ((1.0 - u) ** 2.0)
+                # Мягкий подгиб нижней юбки и плавное вхождение в кривизну носа
+                chin_tuck = 1.0 - 0.065 * ((1.0 - u) ** 2.0) - 0.012 * (t_w ** 2.0)
                 yy = side_surface_y(x, zz) * chin_tuck
                 row_o.append(Vector((x, side * yy, zz)))
                 row_i.append(Vector((x, side * (yy - BUMPER_THICKNESS), zz)))
@@ -952,10 +1138,11 @@ def build_front_structure_and_panels(body_ob, mats, collection):
         _add_thick_grid(bm_bmp, w_out, w_in)
 
     # Нижняя соединительная «юбка» под краш-боксом между крылышками бампера
-    add_box(bm_bmp, FRONT_BUMPER_WING_X + 0.08, FRONT_BUMPER_X + 0.02, -0.54, 0.54, 0.205, 0.232)
+    add_box(bm_bmp, FRONT_BUMPER_WING_X + 0.08, FRONT_BUMPER_X + 0.03, -0.52, 0.52, 0.215, 0.242)
 
     bumper_ob = bmesh_to_object('Front_Bumper', bm_bmp, material=mats['paint'],
-                                smooth=True, collection=collection)
+                                smooth=True, collection=collection, auto_smooth_deg=55.0,
+                                bevel=0.003, bevel_segs=2, subsurf=1)
     uv_box(bumper_ob, scale=1.2)
     _attach(bumper_ob)
 
@@ -1046,7 +1233,8 @@ def build_roof_and_pillars(body_ob, mats, collection):
         inner_pts.append(row_in)
     _add_thick_grid(bm_roof, outer_pts, inner_pts)
     roof_ob = bmesh_to_object('Roof', bm_roof, material=mats['paint'],
-                              smooth=True, collection=collection)
+                              smooth=True, collection=collection, auto_smooth_deg=55.0,
+                              bevel=0.003, bevel_segs=2, subsurf=1)
     uv_top(roof_ob)
     roof_ob.parent = body_ob
     roof_ob.matrix_parent_inverse = body_ob.matrix_world.inverted()
@@ -1079,7 +1267,8 @@ def build_roof_and_pillars(body_ob, mats, collection):
                          y_out - thick_y, y_out, z_val))
         _add_station_beam(bm_a, st_a, side=side)
         pa = bmesh_to_object(f'Pillar_A_{label}', bm_a, material=mats['paint'],
-                             smooth=True, collection=collection)
+                             smooth=True, collection=collection, auto_smooth_deg=55.0,
+                             bevel=0.0025, bevel_segs=2, subsurf=1)
         uv_box(pa, scale=2.0)
         pa.parent = body_ob
         pa.matrix_parent_inverse = body_ob.matrix_world.inverted()
@@ -1110,8 +1299,9 @@ def build_roof_and_pillars(body_ob, mats, collection):
             st_b.append((PILLAR_B_X - half_x, PILLAR_B_X + half_x,
                          y_out - thick_y, y_out, z_val))
         _add_station_beam(bm_b, st_b, side=side)
-        pb = bmesh_to_object(f'Pillar_B_{label}', bm_b, material=mats['carbon'],
-                             smooth=True, collection=collection)
+        pb = bmesh_to_object(f'Pillar_B_{label}', bm_b, material=mats['piano_black'],
+                             smooth=True, collection=collection, auto_smooth_deg=55.0,
+                             bevel=0.0025, bevel_segs=2, subsurf=1)
         uv_box(pb, scale=2.0)
         pb.parent = body_ob
         pb.matrix_parent_inverse = body_ob.matrix_world.inverted()
@@ -1142,7 +1332,8 @@ def build_roof_and_pillars(body_ob, mats, collection):
             st_c.append((x_back, x_front, y_out - thick_y, y_out, z_val))
         _add_station_beam(bm_c, st_c, side=side)
         pc = bmesh_to_object(f'Pillar_C_{label}', bm_c, material=mats['paint'],
-                             smooth=True, collection=collection)
+                             smooth=True, collection=collection, auto_smooth_deg=55.0,
+                             bevel=0.0025, bevel_segs=2, subsurf=1)
         uv_box(pc, scale=2.0)
         pc.parent = body_ob
         pc.matrix_parent_inverse = body_ob.matrix_world.inverted()
@@ -1230,7 +1421,8 @@ def build_glass(mats, collection):
             q_in.append(row_i)
         _add_thick_grid(bm, q_out, q_in)
 
-    ob = bmesh_to_object('Glass', bm, material=mats['glass'], smooth=True, collection=collection)
+    ob = bmesh_to_object('Glass', bm, material=mats['glass'], smooth=True,
+                         collection=collection, auto_smooth_deg=60.0, subsurf=1)
     uv_top(ob)
     return ob
 
@@ -1265,28 +1457,32 @@ def build_wheel(tag, axle_x, side, mats, collection, body_ob=None):
     тормозной диск (Brake_Disc_*) и неподвижный красный суппорт (Brake_Caliper_*)."""
     cy = side * WHEEL_Y
     cz = WHEEL_Z
-    seg = 36
+    seg = 56
     hw = WHEEL_WIDTH / 2.0
     r_bead = 0.242
 
     # 1. Тороидальная шина со скруглёнными боковинами (полая внутри под спицы)
     bm_tire = bmesh.new()
     r_out = WHEEL_R
-    r_sh = WHEEL_R - 0.016
+    r_sh = WHEEL_R - 0.015
+    r_sh2 = WHEEL_R - 0.036
     r_mid = 0.5 * (r_bead + r_out)
     tire_profile = [
-        (r_bead, -hw * 0.90),
-        (r_mid, -hw * 1.02),
-        (r_sh, -hw * 0.96),
-        (r_out, -hw * 0.78),
-        (r_out, +hw * 0.78),
-        (r_sh, +hw * 0.96),
-        (r_mid, +hw * 1.02),
-        (r_bead, +hw * 0.90),
+        (r_bead, -hw * 0.88),
+        (r_mid, -hw * 1.01),
+        (r_sh2, -hw * 1.00),
+        (r_sh, -hw * 0.94),
+        (r_out, -hw * 0.76),
+        (r_out, +hw * 0.76),
+        (r_sh, +hw * 0.94),
+        (r_sh2, +hw * 1.00),
+        (r_mid, +hw * 1.01),
+        (r_bead, +hw * 0.88),
     ]
     _add_y_annulus(bm_tire, r_bead, r_out, -hw, hw, seg=seg, profile=tire_profile)
     tire = bmesh_to_object(f'Wheel_{tag}', bm_tire, material=mats['rubber'],
-                           smooth=True, collection=collection)
+                           smooth=True, collection=collection, auto_smooth_deg=60.0,
+                           subsurf=1)
     uv_cyl(tire, WHEEL_R, WHEEL_WIDTH)
     tire.location = Vector((axle_x, cy, cz))
 
@@ -1331,7 +1527,8 @@ def build_wheel(tag, axle_x, side, mats, collection, body_ob=None):
             bm_rim.faces.new((rings[-1][0], rings[-1][1], rings[-1][2], rings[-1][3]))
 
     rim = bmesh_to_object(f'Rim_{tag}', bm_rim, material=mats['alloy'],
-                          smooth=True, collection=collection)
+                          smooth=True, collection=collection, auto_smooth_deg=50.0,
+                          bevel=0.0018, bevel_segs=2)
     uv_box(rim, scale=4.0)
     rim.parent = tire
     rim.location = Vector((0.0, 0.0, 0.0))
@@ -1340,9 +1537,10 @@ def build_wheel(tag, axle_x, side, mats, collection, body_ob=None):
     bm_disc = bmesh.new()
     y_disc_c = side * (hw * 0.14)
     _add_y_cylinder(bm_disc, 0.172, y_disc_c - 0.011, y_disc_c + 0.011,
-                    seg=28, center_xz=(0.0, 0.0))
-    disc = bmesh_to_object(f'Brake_Disc_{tag}', bm_disc, material=mats['chrome'],
-                           smooth=True, collection=collection)
+                    seg=44, center_xz=(0.0, 0.0))
+    disc = bmesh_to_object(f'Brake_Disc_{tag}', bm_disc, material=mats['brake_disc'],
+                           smooth=True, collection=collection, auto_smooth_deg=45.0,
+                           bevel=0.0015, bevel_segs=1)
     uv_box(disc, scale=5.0)
     disc.parent = tire
     disc.location = Vector((0.0, 0.0, 0.0))
@@ -1353,7 +1551,8 @@ def build_wheel(tag, axle_x, side, mats, collection, body_ob=None):
     add_box(bm_cal, cal_x - 0.036, cal_x + 0.036,
             y_disc_c - 0.028, y_disc_c + 0.028, -0.055, 0.068)
     caliper = bmesh_to_object(f'Brake_Caliper_{tag}', bm_cal, material=mats['caliper'],
-                              smooth=True, collection=collection)
+                              smooth=True, collection=collection, auto_smooth_deg=55.0,
+                              bevel=0.0045, bevel_segs=2)
     uv_box(caliper, scale=8.0)
     caliper.location = Vector((axle_x, cy, cz))
     if body_ob is not None:
@@ -1640,7 +1839,8 @@ def build_doors(body_ob, mats, collection):
         _add_sash_bar(arch_pts)
 
         door_ob = bmesh_to_object(name, bm, material=mats['paint'],
-                                  smooth=True, collection=collection)
+                                  smooth=True, collection=collection, auto_smooth_deg=55.0,
+                                  bevel=0.0028, bevel_segs=2, subsurf=1)
         uv_box(door_ob, scale=1.5)
         door_ob.location = origin
         door_ob.parent = body_ob
@@ -1672,7 +1872,8 @@ def build_doors(body_ob, mats, collection):
         _add_thick_grid(bm_gl, g_out, g_in)
         glass_name = name.replace('Door_', 'Door_Glass_')
         dg_ob = bmesh_to_object(glass_name, bm_gl, material=mats['glass'],
-                                smooth=True, collection=collection)
+                                smooth=True, collection=collection, auto_smooth_deg=60.0,
+                                subsurf=1)
         uv_box(dg_ob, scale=1.5)
         dg_ob.parent = door_ob
         dg_ob.location = Vector((0.0, 0.0, 0.0))
@@ -1706,7 +1907,8 @@ def build_doors(body_ob, mats, collection):
                 yh_l - side * 0.002, yh_l + side * 0.012, zh_l - 0.010, zh_l + 0.010)
         handle_name = name.replace('Door_', 'Door_Handle_')
         hdl_ob = bmesh_to_object(handle_name, bm_hdl, material=mats['chrome'],
-                                 smooth=True, collection=collection)
+                                 smooth=True, collection=collection, auto_smooth_deg=55.0,
+                                 bevel=0.0022, bevel_segs=2)
         uv_box(hdl_ob, scale=10.0)
         hdl_ob.parent = door_ob
         hdl_ob.location = Vector((0.0, 0.0, 0.0))
@@ -1763,7 +1965,8 @@ def build_doors(body_ob, mats, collection):
             bm_mir.faces.new((m_rings[-1][0], m_rings[-1][1], m_rings[-1][2], m_rings[-1][3]))
 
             mir_ob = bmesh_to_object(f'Mirror_{m_tag}', bm_mir, material=mats['paint'],
-                                     smooth=True, collection=collection)
+                                     smooth=True, collection=collection, auto_smooth_deg=55.0,
+                                     bevel=0.0025, bevel_segs=2, subsurf=1)
             uv_box(mir_ob, scale=6.0)
             mir_ob.parent = door_ob
             mir_ob.location = Vector((0.0, 0.0, 0.0))
@@ -1943,7 +2146,8 @@ def build_trunk(body_ob, mats, collection):
                           inner[total_rows - 1][j + 1], inner[total_rows - 1][j]))
 
     trunk_lid = bmesh_to_object('Trunk_Lid', bm_lid, material=mats['paint'],
-                                smooth=True, collection=collection)
+                                smooth=True, collection=collection, auto_smooth_deg=55.0,
+                                bevel=0.003, bevel_segs=2, subsurf=1)
     uv_box(trunk_lid, scale=1.0)
     trunk_lid.location = hinge_origin
     trunk_lid.parent = body_ob
@@ -2096,7 +2300,7 @@ def build_hood(body_ob, mats, collection):
     _add_z_cylinder(bm_eng, 0.022, 0.636, 0.685, seg=12, center_xy=(1.90, -0.41))
 
     engine_bay = bmesh_to_object('Engine_Bay', bm_eng, material=mats['carbon'],
-                                 smooth=True, collection=collection)
+                                 smooth=True, collection=collection, bevel=0.003)
     uv_box(engine_bay, scale=2.5)
     _attach_body(engine_bay)
 
@@ -2118,7 +2322,7 @@ def build_hood(body_ob, mats, collection):
     # Алюминиевая поперечная распорка чашек стоек (перед жабо)
     add_box(bm_em, 1.28, 1.32, -0.50, 0.50, 0.745, 0.772)
     em_ob = bmesh_to_object('Engine_Metal', bm_em, material=mats['alloy'],
-                            smooth=True, collection=collection)
+                            smooth=True, collection=collection, bevel=0.0025)
     uv_box(em_ob, scale=3.5)
     _attach_body(em_ob)
 
@@ -2127,7 +2331,7 @@ def build_hood(body_ob, mats, collection):
     add_box(bm_ct, 1.26, 1.46, -0.47, -0.33, 0.55, 0.675)
     _add_z_cylinder(bm_ct, 0.026, 0.676, 0.708, seg=14, center_xy=(1.36, -0.40))
     ct_ob = bmesh_to_object('Coolant_Tank', bm_ct, material=mats['white'],
-                            smooth=True, collection=collection)
+                            smooth=True, collection=collection, bevel=0.003)
     uv_box(ct_ob, scale=6.0)
     _attach_body(ct_ob)
 
@@ -2198,7 +2402,8 @@ def build_hood(body_ob, mats, collection):
     _hood_inner_bar(2.16, -0.025, 2.22, +0.025, half_w=0.008, depth=0.030)
 
     hood_lid = bmesh_to_object('Hood_Lid', bm_hood, material=mats['paint'],
-                               smooth=True, collection=collection)
+                               smooth=True, collection=collection, auto_smooth_deg=55.0,
+                               bevel=0.003, bevel_segs=2, subsurf=1)
     uv_box(hood_lid, scale=1.0)
     hood_lid.location = hinge_origin
     _attach_body(hood_lid)
@@ -2303,10 +2508,17 @@ def build_hood(body_ob, mats, collection):
 # --------------------------------------------------------------------------- #
 # 7. Свет, студия (коллекция Studio), мир, камеры
 # --------------------------------------------------------------------------- #
-def add_light(name, loc, energy, size=0.8, rot=None, aim_target=None, collection=None):
+def add_light(name, loc, energy, size=0.8, size_y=None, rot=None,
+              aim_target=None, color=(1.0, 1.0, 1.0), collection=None):
     ld = bpy.data.lights.new(name, 'AREA')
     ld.energy = energy
-    ld.size = size
+    ld.color = color
+    if size_y is not None:
+        ld.shape = 'RECTANGLE'
+        ld.size = size
+        ld.size_y = size_y
+    else:
+        ld.size = size
     ob = bpy.data.objects.new(name, ld)
     ob.location = Vector(loc)
     if aim_target is not None:
@@ -2373,9 +2585,9 @@ def build_volvo_details(body_ob, mats, collection):
     gw, gz0, gz1 = 0.40, 0.44, 0.69
     bm_gr = bmesh.new()
     _add_curved_strip(bm_gr, -gw, gw, gz0, gz1, front=True,
-                      off_out=0.008, thick=0.024, ny=11, nz=5, concave=0.012)
-    grille_ob = bmesh_to_object('Grille_Front', bm_gr, material=mats['carbon'],
-                                smooth=True, collection=collection)
+                      off_out=0.020, thick=0.028, ny=13, nz=5, concave=0.007)
+    grille_ob = bmesh_to_object('Grille_Front', bm_gr, material=mats['piano_black'],
+                                smooth=True, collection=collection, bevel=0.0025)
     uv_box(grille_ob, scale=4.0)
     objs.append(grille_ob)
 
@@ -2384,22 +2596,22 @@ def build_volvo_details(body_ob, mats, collection):
     ft = 0.015
     # Верхняя и нижняя контурные перекладины рамки
     _add_curved_strip(bm_gc, -gw - ft, gw + ft, gz1, gz1 + ft, front=True,
-                      off_out=0.016, thick=0.018, ny=11, nz=2)
+                      off_out=0.026, thick=0.018, ny=11, nz=2)
     _add_curved_strip(bm_gc, -gw - ft, gw + ft, gz0 - ft, gz0, front=True,
-                      off_out=0.016, thick=0.018, ny=11, nz=2)
+                      off_out=0.026, thick=0.018, ny=11, nz=2)
     # Левая и правая вертикальные стойки рамки (с зазором 2 мм -> 0 non-manifold)
     _add_curved_strip(bm_gc, gw + 0.002, gw + ft, gz0 + 0.002, gz1 - 0.002, front=True,
-                      off_out=0.016, thick=0.018, ny=2, nz=5)
+                      off_out=0.026, thick=0.018, ny=2, nz=5)
     _add_curved_strip(bm_gc, -gw - ft, -gw - 0.002, gz0 + 0.002, gz1 - 0.002, front=True,
-                      off_out=0.016, thick=0.018, ny=2, nz=5)
-    # 15 вертикальных хромированных ламелей (слегка вогнутых к центру)
+                      off_out=0.026, thick=0.018, ny=2, nz=5)
+    # 15 вертикальных хромированных ламелей (слегка вогнутых к центру, строго перед чёрной основой)
     n_slats = 15
     for i in range(n_slats):
         u = -1.0 + 2.0 * i / (n_slats - 1)
         yy = u * (gw - 0.022)
         sx = _surf_x(yy, 0.5 * (gz0 + gz1), front=True)
-        conc = 0.010 * (1.0 - u * u)
-        add_box(bm_gc, sx - 0.006 - conc, sx + 0.013 - conc,
+        conc = 0.007 * (1.0 - u * u)
+        add_box(bm_gc, sx + 0.006 - conc, sx + 0.023 - conc,
                 yy - 0.0035, yy + 0.0035, gz0 + 0.006, gz1 - 0.006)
     # Гладкая наклонная диагональная полоса Volvo Iron Mark (единая наклонная балка без «лесенки»)
     z_gmid = 0.5 * (gz0 + gz1)
@@ -2408,7 +2620,7 @@ def build_volvo_details(body_ob, mats, collection):
         t_m = k / 8.0
         y_m = -0.35 * (1.0 - t_m) + 0.35 * t_m
         z_m = (gz0 + 0.014) * (1.0 - t_m) + (gz1 - 0.014) * t_m
-        sx = _surf_x(y_m, z_m, front=True) + 0.014
+        sx = _surf_x(y_m, z_m, front=True) + 0.024
         d_pts.append(Vector((sx, y_m, z_m)))
     # Замкнутый наклонный брусок вдоль d_pts (сечение в плоскости X × перпендикуляр в YZ)
     diag_dir = (d_pts[-1] - d_pts[0]).normalized()
@@ -2431,7 +2643,7 @@ def build_volvo_details(body_ob, mats, collection):
 
     # Круглый 16-гранный центральный знак Volvo Iron Mark
     sx_c = _surf_x(0.0, z_gmid, front=True)
-    seg_em = 16
+    seg_em = 24
     r_em = 0.044
     em_f = []
     em_b = []
@@ -2439,10 +2651,10 @@ def build_volvo_details(body_ob, mats, collection):
         ang = 2.0 * math.pi * i_e / seg_em
         ey = r_em * math.cos(ang)
         ez = z_gmid + r_em * math.sin(ang)
-        em_f.append(bm_gc.verts.new(Vector((sx_c + 0.025, ey, ez))))
-        em_b.append(bm_gc.verts.new(Vector((sx_c + 0.009, ey, ez))))
-    c_f = bm_gc.verts.new(Vector((sx_c + 0.027, 0.0, z_gmid)))
-    c_b = bm_gc.verts.new(Vector((sx_c + 0.008, 0.0, z_gmid)))
+        em_f.append(bm_gc.verts.new(Vector((sx_c + 0.035, ey, ez))))
+        em_b.append(bm_gc.verts.new(Vector((sx_c + 0.019, ey, ez))))
+    c_f = bm_gc.verts.new(Vector((sx_c + 0.037, 0.0, z_gmid)))
+    c_b = bm_gc.verts.new(Vector((sx_c + 0.018, 0.0, z_gmid)))
     for i_e in range(seg_em):
         jn = (i_e + 1) % seg_em
         bm_gc.faces.new((em_b[i_e], em_f[i_e], em_f[jn], em_b[jn]))
@@ -2456,12 +2668,12 @@ def build_volvo_details(body_ob, mats, collection):
     # 2. Контурный нижний воздухозаборник переднего бампера (аккуратно утоплен в бампер!)
     bm_in = bmesh.new()
     _add_curved_strip(bm_in, -0.56, 0.56, 0.255, 0.365, front=True,
-                      off_out=0.004, thick=0.022, ny=13, nz=4)
+                      off_out=0.004, thick=0.022, ny=15, nz=4)
     # Аккуратная нижняя губа-сплиттер строго в габаритах носа (без выпирающих углов)
     _add_curved_strip(bm_in, -0.48, 0.48, 0.215, 0.242, front=True,
-                      off_out=0.006, thick=0.036, ny=11, nz=2)
+                      off_out=0.006, thick=0.036, ny=13, nz=2)
     intake_ob = bmesh_to_object('Bumper_Intake_Front', bm_in, material=mats['carbon'],
-                                smooth=True, collection=collection)
+                                smooth=True, collection=collection, bevel=0.0025)
     uv_box(intake_ob, scale=3.0)
     objs.append(intake_ob)
 
@@ -2471,12 +2683,12 @@ def build_volvo_details(body_ob, mats, collection):
         ya, yb = (y_in, y_out) if y_in < y_out else (y_out, y_in)
         z_lo, z_hi = 0.545, 0.680
 
-        # 3a. Тёмный огибающий корпус фары (следует точной кривизне переднего угла!)
+        # 3a. Глянцево-чёрный огибающий корпус фары (следует точной кривизне переднего угла!)
         bm_hl = bmesh.new()
         _add_curved_strip(bm_hl, ya, yb, z_lo, z_hi, front=True,
-                          off_out=0.007, thick=0.016, ny=9, nz=4)
-        hl_ob = bmesh_to_object(f'Headlight_{label}', bm_hl, material=mats['carbon'],
-                                smooth=True, collection=collection)
+                          off_out=0.007, thick=0.016, ny=11, nz=5)
+        hl_ob = bmesh_to_object(f'Headlight_{label}', bm_hl, material=mats['piano_black'],
+                                smooth=True, collection=collection, bevel=0.0025)
         uv_box(hl_ob, scale=5.0)
         objs.append(hl_ob)
 
@@ -2489,7 +2701,7 @@ def build_volvo_details(body_ob, mats, collection):
             py1 = y_in + (y_out - y_in) * u1
             p_lo, p_hi = (py0, py1) if py0 < py1 else (py1, py0)
             _add_curved_strip(bm_drl, p_lo, p_hi, z_mid + dz0, z_mid + dz1,
-                              front=True, off_out=0.015, thick=0.008, ny=6, nz=2)
+                              front=True, off_out=0.015, thick=0.008, ny=7, nz=2)
 
         # Длинный ствол молота Тора (уходит к переднему крылу)
         _drl_curved(0.18, 0.94, -0.009, +0.009)
@@ -2499,24 +2711,36 @@ def build_volvo_details(body_ob, mats, collection):
         _drl_curved(0.06, 0.26, +0.044, +0.055)
         _drl_curved(0.06, 0.26, -0.055, -0.044)
         drl_ob = bmesh_to_object(f'Headlight_DRL_{label}', bm_drl,
-                                 material=mats['drl'], smooth=False,
-                                 collection=collection)
+                                 material=mats['drl'], smooth=True,
+                                 collection=collection, bevel=0.0015, bevel_segs=1)
         uv_box(drl_ob, scale=8.0)
         objs.append(drl_ob)
 
         # 3c. Прозрачный огибающий рассеиватель (линза) поверх фары
         bm_ln = bmesh.new()
         _add_curved_strip(bm_ln, ya - 0.004, yb + 0.004, z_lo - 0.004, z_hi + 0.004,
-                          front=True, off_out=0.020, thick=0.005, ny=9, nz=4)
+                          front=True, off_out=0.020, thick=0.005, ny=11, nz=5)
         ln_ob = bmesh_to_object(f'Headlight_Lens_{label}', bm_ln, material=mats['lens'],
-                                smooth=True, collection=collection)
+                                smooth=True, collection=collection, bevel=0.002, bevel_segs=2)
         uv_box(ln_ob, scale=5.0)
         objs.append(ln_ob)
 
-    # 4. Огибающие C-образные задние фонари Volvo S90 (Tail_Light_L/R)
+    # 4. Огибающие C-образные задние фонари Volvo S90 (корпус + LED + прозрачная линза)
     for label, sy in (('L', 1.0), ('R', -1.0)):
         y_in, y_out = sy * 0.42, sy * 0.74
+        ya_t, yb_t = (y_in, y_out) if y_in < y_out else (y_out, y_in)
         z_mid = 0.77
+
+        # 4a. Тёмно-рубиновый лаковый корпус блок-фонаря
+        bm_th = bmesh.new()
+        _add_curved_strip(bm_th, ya_t, yb_t, z_mid - 0.112, z_mid + 0.108,
+                          front=False, off_out=0.005, thick=0.014, ny=11, nz=5)
+        th_ob = bmesh_to_object(f'Tail_Housing_{label}', bm_th, material=mats['tail_housing'],
+                                smooth=True, collection=collection, bevel=0.0025)
+        uv_box(th_ob, scale=5.0)
+        objs.append(th_ob)
+
+        # 4b. C-образные светодиодные секции Volvo S90
         bm_tl = bmesh.new()
 
         def _tl_curved(u0, u1, dz0, dz1):
@@ -2524,25 +2748,34 @@ def build_volvo_details(body_ob, mats, collection):
             py1 = y_in + (y_out - y_in) * u1
             p_lo, p_hi = (py0, py1) if py0 < py1 else (py1, py0)
             _add_curved_strip(bm_tl, p_lo, p_hi, z_mid + dz0, z_mid + dz1,
-                              front=False, off_out=0.011, thick=0.010, ny=7, nz=2)
+                              front=False, off_out=0.013, thick=0.008, ny=8, nz=2)
 
         # Знаменитая широкая C-образная скоба Volvo S90 (верхняя, наружная, нижняя + центр)
-        _tl_curved(0.00, 0.96, +0.068, +0.098)  # верхняя горизонталь
-        _tl_curved(0.84, 0.96, -0.086, +0.064)  # наружная вертикальная стойка на углу кормы
-        _tl_curved(0.06, 0.96, -0.102, -0.072)  # нижняя горизонталь
-        _tl_curved(0.14, 0.78, -0.012, +0.012)  # центральная LED-полоса стоп-сигнала
+        _tl_curved(0.02, 0.94, +0.068, +0.095)  # верхняя горизонталь
+        _tl_curved(0.84, 0.94, -0.084, +0.064)  # наружная вертикальная стойка на углу кормы
+        _tl_curved(0.06, 0.94, -0.100, -0.073)  # нижняя горизонталь
+        _tl_curved(0.14, 0.78, -0.011, +0.011)  # центральная LED-полоса стоп-сигнала
         tl_ob = bmesh_to_object(f'Tail_Light_{label}', bm_tl,
-                                material=mats['tail'], smooth=False,
-                                collection=collection)
+                                material=mats['tail'], smooth=True,
+                                collection=collection, bevel=0.0015, bevel_segs=1)
         uv_box(tl_ob, scale=6.0)
         objs.append(tl_ob)
+
+        # 4c. Прозрачная внешняя линза заднего фонаря
+        bm_tln = bmesh.new()
+        _add_curved_strip(bm_tln, ya_t - 0.003, yb_t + 0.003, z_mid - 0.115, z_mid + 0.111,
+                          front=False, off_out=0.018, thick=0.004, ny=11, nz=5)
+        tln_ob = bmesh_to_object(f'Tail_Lens_{label}', bm_tln, material=mats['lens'],
+                                 smooth=True, collection=collection, bevel=0.002)
+        uv_box(tln_ob, scale=5.0)
+        objs.append(tln_ob)
 
     # 5. Контурный задний диффузор (Rear_Diffuser) и двойные встроенные патрубки (Exhaust_L/R)
     bm_rd = bmesh.new()
     _add_curved_strip(bm_rd, -0.56, 0.56, 0.245, 0.355, front=False,
-                      off_out=0.005, thick=0.028, ny=13, nz=4)
+                      off_out=0.005, thick=0.028, ny=15, nz=4)
     rd_ob = bmesh_to_object('Rear_Diffuser', bm_rd, material=mats['carbon'],
-                            smooth=True, collection=collection)
+                            smooth=True, collection=collection, bevel=0.0025)
     uv_box(rd_ob, scale=3.0)
     objs.append(rd_ob)
 
@@ -2556,7 +2789,7 @@ def build_volvo_details(body_ob, mats, collection):
         add_box(bm_ex, ex_s - 0.014, ex_s + 0.042, ey - 0.074, ey - 0.060, 0.279, 0.313)
         add_box(bm_ex, ex_s - 0.014, ex_s + 0.042, ey + 0.060, ey + 0.074, 0.279, 0.313)
         ex_ob = bmesh_to_object(f'Exhaust_{label}', bm_ex, material=mats['chrome'],
-                                smooth=True, collection=collection)
+                                smooth=True, collection=collection, bevel=0.0022)
         uv_box(ex_ob, scale=8.0)
         objs.append(ex_ob)
 
@@ -2570,7 +2803,7 @@ def build_volvo_details(body_ob, mats, collection):
         y_inner = side * (WHEEL_Y - WHEEL_WIDTH * 0.60)
         y_outer = side * (WHEEL_Y + WHEEL_WIDTH * 0.42)
         ya, yb = (y_inner, y_outer) if y_inner < y_outer else (y_outer, y_inner)
-        seg_a = 18
+        seg_a = 32
         rings_ww = []
         for i in range(seg_a + 1):
             ang = math.radians(-12.0 + 204.0 * i / seg_a)
@@ -2589,41 +2822,54 @@ def build_volvo_details(body_ob, mats, collection):
         bm_ww.faces.new((rings_ww[0][0], rings_ww[0][3], rings_ww[0][2], rings_ww[0][1]))
         bm_ww.faces.new((rings_ww[-1][0], rings_ww[-1][1], rings_ww[-1][2], rings_ww[-1][3]))
         ww_ob = bmesh_to_object(f'Wheel_Well_{tag}', bm_ww, material=mats['carbon'],
-                                smooth=True, collection=collection)
+                                smooth=True, collection=collection, auto_smooth_deg=55.0)
         uv_box(ww_ob, scale=3.0)
         objs.append(ww_ob)
 
-        # 6b. Скульптурная бровь колёсной арки в цвет кузова (fender lip)
+        # 6b. Скруглённая скульптурная бровь колёсной арки в цвет кузова (6-точечный профиль)
         bm_wa = bmesh.new()
         r_lip_in = WHEEL_R + 0.024
+        r_lip_mid = WHEEL_R + 0.044
         r_lip_out = WHEEL_R + 0.068
         rings_wa = []
         for i in range(seg_a + 1):
             ang = math.radians(-8.0 + 196.0 * i / seg_a)
             ca, sa = math.cos(ang), math.sin(ang)
-            x_in = axle + r_lip_in * ca
-            z_in = WHEEL_Z + r_lip_in * sa
-            x_out = axle + r_lip_out * ca
-            z_out = WHEEL_Z + r_lip_out * sa
+            x_in, z_in = axle + r_lip_in * ca, WHEEL_Z + r_lip_in * sa
+            x_mid, z_mid = axle + r_lip_mid * ca, WHEEL_Z + r_lip_mid * sa
+            x_out, z_out = axle + r_lip_out * ca, WHEEL_Z + r_lip_out * sa
             y_surf = side_surface_y(x_in, max(ZB(x_in) + 0.04, z_in))
-            y_f_in = side * (y_surf - 0.045)
-            y_f_out = side * (y_surf + 0.010)
-            yfa, yfb = (y_f_in, y_f_out) if y_f_in < y_f_out else (y_f_out, y_f_in)
-            rings_wa.append([
-                bm_wa.verts.new(Vector((x_in, yfa, z_in))),
-                bm_wa.verts.new(Vector((x_out, yfa, z_out))),
-                bm_wa.verts.new(Vector((x_out, yfb, z_out))),
-                bm_wa.verts.new(Vector((x_in, yfb, z_in))),
-            ])
+            # Профиль с плавным переходом в крыло снаружи и скруглением кромки арки
+            pts_sec = [
+                (x_in, side * (y_surf - 0.044), z_in),
+                (x_out, side * (y_surf - 0.044), z_out),
+                (x_out, side * (y_surf + 0.002), z_out),
+                (x_mid, side * (y_surf + 0.011), z_mid),
+                (x_in, side * (y_surf + 0.006), z_in),
+                (x_in, side * (y_surf - 0.012), z_in),
+            ]
+            if side < 0:
+                pts_sec.reverse()
+            rings_wa.append([bm_wa.verts.new(Vector(p)) for p in pts_sec])
+        n_sec_wa = len(rings_wa[0])
         for i in range(seg_a):
             r0, r1 = rings_wa[i], rings_wa[i + 1]
-            for k in range(4):
-                kn = (k + 1) % 4
+            for k in range(n_sec_wa):
+                kn = (k + 1) % n_sec_wa
                 bm_wa.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
-        bm_wa.faces.new((rings_wa[0][0], rings_wa[0][3], rings_wa[0][2], rings_wa[0][1]))
-        bm_wa.faces.new((rings_wa[-1][0], rings_wa[-1][1], rings_wa[-1][2], rings_wa[-1][3]))
+        # Замыкаем торцы веером из центра -> чистые треугольники (0 n-gon)
+        for end_ring, flip in ((rings_wa[0], True), (rings_wa[-1], False)):
+            c_end = sum((v.co for v in end_ring), Vector()) / float(n_sec_wa)
+            vc_end = bm_wa.verts.new(c_end)
+            for k in range(n_sec_wa):
+                kn = (k + 1) % n_sec_wa
+                if flip:
+                    bm_wa.faces.new((vc_end, end_ring[kn], end_ring[k]))
+                else:
+                    bm_wa.faces.new((vc_end, end_ring[k], end_ring[kn]))
         wa_ob = bmesh_to_object(f'Wheel_Arch_{tag}', bm_wa, material=mats['paint'],
-                                smooth=True, collection=collection)
+                                smooth=True, collection=collection, auto_smooth_deg=55.0,
+                                subsurf=1)
         uv_box(wa_ob, scale=3.0)
         objs.append(wa_ob)
 
@@ -2647,23 +2893,30 @@ def build_lighting(mats, studio_col):
     add_light('Int_EngineLight', (1.65, 0.0, 1.12), 6.5, size=0.45,
               rot=(0.0, 0.0, 0.0), collection=studio_col)
 
-    # Студийный свет: 6 Area-ламп вокруг машины, каждая нацелена на TARGET
-    studio = [
-        ('Studio_Light_1', (-4.5, -4.5, 3.2), 260.0),
-        ('Studio_Light_2', (4.5, -4.5, 3.2), 260.0),
-        ('Studio_Light_3', (-6.0, 2.5, 2.6), 180.0),
-        ('Studio_Light_4', (6.0, 2.5, 2.6), 180.0),
-        ('Studio_Light_5', (0.0, 7.5, 3.6), 280.0),
-        ('Studio_Light_6', (0.0, -8.5, 2.6), 160.0),
-    ]
-    for name, loc, en in studio:
-        add_light(name, loc, en, size=1.4, aim_target=TARGET, collection=studio_col)
+    # Автомобильная фотостудия: длинные мягкие софтбоксы-ленты (стрипы) для плавных бликов
+    # Верхний продольный софтбокс — формирует цельную бликовую линию по крыше, плечу и капоту
+    add_light('Studio_Overhead', (0.15, 0.0, 3.85), 420.0, size=5.8, size_y=1.65,
+              rot=(0.0, 0.0, 0.0), color=(0.98, 0.99, 1.0), collection=studio_col)
+    # Два длинных боковых софтбокса-стрипа (чистый горизонтальный градиент по дверям и крыльям)
+    add_light('Studio_Strip_R', (0.15, -5.2, 2.05), 340.0, size=6.2, size_y=0.95,
+              aim_target=(0.15, 0.0, 0.72), color=(0.97, 0.99, 1.0), collection=studio_col)
+    add_light('Studio_Strip_L', (0.15, +5.4, 2.25), 290.0, size=6.2, size_y=1.05,
+              aim_target=(0.15, 0.0, 0.75), color=(0.94, 0.97, 1.0), collection=studio_col)
+    # Передний ключевой тёпло-нейтральный софтбокс (подчёркивает решётку, фары и моторный отсек)
+    add_light('Studio_Key_Front', (5.4, -3.4, 2.45), 280.0, size=2.6, size_y=1.35,
+              aim_target=(1.40, 0.0, 0.65), color=(1.0, 0.98, 0.95), collection=studio_col)
+    # Задний контровой софтбокс (выделяет силуэт фастбэка, C-фонари и диффузор)
+    add_light('Studio_Rim_Rear', (-5.4, -3.0, 2.35), 240.0, size=2.6, size_y=1.25,
+              aim_target=(-1.35, 0.0, 0.72), color=(0.95, 0.97, 1.0), collection=studio_col)
+    # Мягкий низкий заполняющий свет со стороны колёс (читаемые спицы дисков и тормоза)
+    add_light('Studio_Wheel_Fill', (0.15, -6.5, 0.75), 110.0, size=5.2, size_y=0.60,
+              aim_target=(0.15, 0.0, 0.36), color=(0.98, 0.98, 1.0), collection=studio_col)
 
-    # Студийный пол (тонкая замкнутая плита под Z = 0, не перекрывает ни одну из камер)
-    _make_box_object('Cyclorama', (-14.0, 14.0, -14.0, 14.0, -0.04, 0.0),
-                     mats['white'], studio_col, uv_scale=0.1)
+    # Студийный сатиновый пол с мягким отражением (замкнутая плита под Z = 0)
+    _make_box_object('Cyclorama', (-18.0, 18.0, -18.0, 18.0, -0.04, 0.0),
+                     mats['floor'], studio_col, uv_scale=0.1)
 
-    # Мир + HDRI (если файл присутствует на диске)
+    # Мир + HDRI (или процедурный студийный градиентный купол для реалистичных отражений)
     world = bpy.data.worlds.new('World_Studio')
     bpy.context.scene.world = world
     world.use_nodes = True
@@ -2676,8 +2929,26 @@ def build_lighting(mats, studio_col):
         nt.links.new(env.outputs['Color'], bg.inputs['Color'])
         bg.inputs['Strength'].default_value = 1.0
     else:
-        bg.inputs['Color'].default_value = (0.12, 0.13, 0.15, 1.0)
-        bg.inputs['Strength'].default_value = 1.0
+        tc = nt.nodes.new('ShaderNodeTexCoord')
+        sep = nt.nodes.new('ShaderNodeSeparateXYZ')
+        mrange = nt.nodes.new('ShaderNodeMapRange')
+        mrange.inputs['From Min'].default_value = -0.15
+        mrange.inputs['From Max'].default_value = 0.85
+        ramp = nt.nodes.new('ShaderNodeValToRGB')
+        # Мягкий студийный градиент: глубокий низ -> светлая лента горизонта -> мягкий потолок
+        ramp.color_ramp.elements[0].position = 0.00
+        ramp.color_ramp.elements[0].color = (0.045, 0.050, 0.060, 1.0)
+        e_hor = ramp.color_ramp.elements.new(0.24)
+        e_hor.color = (0.24, 0.26, 0.30, 1.0)
+        e_mid = ramp.color_ramp.elements.new(0.45)
+        e_mid.color = (0.11, 0.125, 0.15, 1.0)
+        ramp.color_ramp.elements[1].position = 0.92
+        ramp.color_ramp.elements[1].color = (0.34, 0.36, 0.40, 1.0)
+        nt.links.new(tc.outputs['Generated'], sep.inputs['Vector'])
+        nt.links.new(sep.outputs['Z'], mrange.inputs['Value'])
+        nt.links.new(mrange.outputs['Result'], ramp.inputs['Fac'])
+        nt.links.new(ramp.outputs['Color'], bg.inputs['Color'])
+        bg.inputs['Strength'].default_value = 1.15
 
 
 def build_cameras(studio_col):
@@ -2768,12 +3039,18 @@ def setup_render(samples=48):
     scene.render.engine = 'CYCLES'
     scene.cycles.device = 'CPU'
     scene.cycles.samples = samples
+    scene.cycles.max_bounces = 10
+    scene.cycles.glossy_bounces = 6
+    scene.cycles.transmission_bounces = 6
     scene.cycles.transparent_max_bounces = 48  # обязательно (иначе муар на стёклах)
-    scene.cycles.blur_glossy = 2.0             # обязательно (иначе муар на стёклах)
+    scene.cycles.blur_glossy = 1.0             # мягкое подавление шума без замыливания бликов
+    scene.cycles.use_denoising = True
+    scene.cycles.denoiser = 'OPENIMAGEDENOISE'
     scene.render.resolution_x = 1440
     scene.render.resolution_y = 810
     scene.render.resolution_percentage = 100
     scene.view_settings.view_transform = 'AgX'
+    scene.view_settings.exposure = 0.15
     try:
         scene.view_settings.look = 'AgX - Medium High Contrast'
     except Exception as exc:

@@ -84,7 +84,8 @@ def test_collections_and_bounding_box(built_scene_dir):
         'Trunk_Lift_Rod_L', 'Trunk_Lift_Rod_R',
         'Grille_Front', 'Grille_Chrome', 'Bumper_Intake_Front',
         'Headlight_L', 'Headlight_R', 'Headlight_DRL_L', 'Headlight_DRL_R',
-        'Tail_Light_L', 'Tail_Light_R', 'Rear_Diffuser', 'Exhaust_L', 'Exhaust_R',
+        'Tail_Light_L', 'Tail_Light_R', 'Tail_Housing_L', 'Tail_Housing_R',
+        'Tail_Lens_L', 'Tail_Lens_R', 'Rear_Diffuser', 'Exhaust_L', 'Exhaust_R',
         'Wheel_Arch_FL', 'Wheel_Arch_FR', 'Wheel_Arch_RL', 'Wheel_Arch_RR',
         'Wheel_Well_FL', 'Wheel_Well_FR', 'Wheel_Well_RL', 'Wheel_Well_RR',
     ):
