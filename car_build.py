@@ -1904,20 +1904,27 @@ def build_roof_and_pillars(body_ob, mats, collection):
             ya, zv = upper_side_yz(x_v, t_v)
             return Vector((x_v, side * (ya + y_off), zv + z_off))
 
-        # Непрерывная хромированная дуга: вдоль задней кромки Pillar_A -> верх крыши ->
+        # Непрерывная хромированная дуга со скруглёнными верхними углами:
+        # вдоль Pillar_A -> скругление переднего угла -> верх крыши -> скругление заднего угла ->
         # спуск по Pillar_C -> поворот и подоконник задней форточки до заднего стыка Door_Rear
         dlo_pts = []
         xa_b, xa_t = WINDSHIELD_X_BOT - 0.082, ROOF_X_FRONT - 0.030
-        for k in range(6):
-            t = 0.02 + 0.96 * (k / 5.0)
+        for k in range(5):
+            t = 0.02 + 0.86 * (k / 4.0)
             dlo_pts.append(_dlo_pt(xa_b * (1.0 - t) + xa_t * t, t, y_off=0.005))
-        for k in range(1, 7):
-            u = k / 6.0
-            xx = xa_t * (1.0 - u) + (ROOF_X_REAR + 0.02) * u
-            dlo_pts.append(_dlo_pt(xx, 0.985, y_off=0.005))
-        xc_t, xc_b = ROOF_X_REAR + 0.02, REAR_GLASS_X_BOT + 0.34
+        # Плавный радиус перехода Pillar_A -> Roof
+        dlo_pts.append(_dlo_pt(xa_t + 0.015, 0.945, y_off=0.005))
+        dlo_pts.append(_dlo_pt(xa_t - 0.018, 0.978, y_off=0.005))
         for k in range(1, 6):
-            t = 0.985 - 0.955 * (k / 5.0)
+            u = k / 6.0
+            xx = (xa_t - 0.04) * (1.0 - u) + (ROOF_X_REAR + 0.06) * u
+            dlo_pts.append(_dlo_pt(xx, 0.985, y_off=0.005))
+        # Плавный радиус перехода Roof -> Pillar_C (без резкого углового излома!)
+        xc_t, xc_b = ROOF_X_REAR + 0.02, REAR_GLASS_X_BOT + 0.34
+        dlo_pts.append(_dlo_pt(xc_t + 0.025, 0.976, y_off=0.005))
+        dlo_pts.append(_dlo_pt(xc_t - 0.015, 0.940, y_off=0.005))
+        for k in range(1, 6):
+            t = 0.88 - 0.85 * (k / 5.0)
             dlo_pts.append(_dlo_pt(xc_t * t + xc_b * (1.0 - t), t, y_off=0.005))
         # Нижний поясной отрезок задней форточки от угла C-стойки до стыка задней двери
         xq_f = CABIN_CUT_X_REAR - 0.006
@@ -1934,6 +1941,80 @@ def build_roof_and_pillars(body_ob, mats, collection):
         wt_ob.parent = body_ob
         wt_ob.matrix_parent_inverse = body_ob.matrix_world.inverted()
         objs.append(wt_ob)
+
+    # 6. Аэродинамическая антенна «акулий плавник» (Roof_Antenna) на задней части крыши
+    bm_ant = bmesh.new()
+    x_ant = ROOF_X_REAR + 0.16
+    z_ant = ZR(x_ant) - 0.004
+    ant_specs = [
+        (x_ant + 0.085, 0.018, 0.008, z_ant),
+        (x_ant + 0.030, 0.022, 0.010, z_ant + 0.028),
+        (x_ant - 0.035, 0.017, 0.007, z_ant + 0.056),
+        (x_ant - 0.075, 0.010, 0.004, z_ant + 0.062),
+    ]
+    a_rings = []
+    for xa, w_b, w_t, z_hi in ant_specs:
+        a_rings.append([
+            bm_ant.verts.new(Vector((xa, -w_b, z_ant - 0.004))),
+            bm_ant.verts.new(Vector((xa, +w_b, z_ant - 0.004))),
+            bm_ant.verts.new(Vector((xa, +w_t, z_hi))),
+            bm_ant.verts.new(Vector((xa, -w_t, z_hi))),
+        ])
+    for i_a in range(len(a_rings) - 1):
+        r0, r1 = a_rings[i_a], a_rings[i_a + 1]
+        for k in range(4):
+            kn = (k + 1) % 4
+            bm_ant.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
+    bm_ant.faces.new((a_rings[0][0], a_rings[0][3], a_rings[0][2], a_rings[0][1]))
+    bm_ant.faces.new((a_rings[-1][0], a_rings[-1][1], a_rings[-1][2], a_rings[-1][3]))
+    ant_ob = bmesh_to_object('Roof_Antenna', bm_ant, material=mats['paint'],
+                             smooth=True, collection=collection, auto_smooth_deg=55.0,
+                             bevel=0.0020, bevel_segs=2, subsurf=1)
+    uv_box(ant_ob, scale=8.0)
+    ant_ob.parent = roof_ob
+    ant_ob.matrix_parent_inverse = roof_ob.matrix_world.inverted()
+    objs.append(ant_ob)
+
+    # 7. Стеклоочистители (Wiper_L, Wiper_R) у нижнего края лобового стекла
+    z_wb = BELT(WINDSHIELD_X_BOT) + 0.016
+    for w_lbl, y_piv, y_tip in (('L', 0.06, 0.62), ('R', -0.46, 0.14)):
+        bm_wp = bmesh.new()
+        x_piv = WINDSHIELD_X_BOT + 0.035
+        x_tip = WINDSHIELD_X_BOT - 0.012
+        w_pts = []
+        for k in range(6):
+            u_w = k / 5.0
+            yy = y_piv * (1.0 - u_w) + y_tip * u_w
+            xx = x_piv * (1.0 - u_w) + x_tip * u_w + 0.016 * (1.0 - (yy / 0.72) ** 2)
+            zz = z_wb + 0.022 * u_w - 0.006 * (yy * yy)
+            w_pts.append(Vector((xx, yy, zz)))
+        w_rings = []
+        for idx_w, p in enumerate(w_pts):
+            t_w = (w_pts[1] - w_pts[0]) if idx_w == 0 else (w_pts[idx_w] - w_pts[idx_w - 1])
+            t_w.normalize()
+            up_w = Vector((0.0, 0.0, 1.0))
+            side_w = t_w.cross(up_w).normalized()
+            hw_w = 0.0075
+            hz_w = 0.0060
+            w_rings.append([
+                bm_wp.verts.new(p - side_w * hw_w - up_w * hz_w),
+                bm_wp.verts.new(p + side_w * hw_w - up_w * hz_w),
+                bm_wp.verts.new(p + side_w * hw_w + up_w * hz_w),
+                bm_wp.verts.new(p - side_w * hw_w + up_w * hz_w),
+            ])
+        for i_w in range(len(w_rings) - 1):
+            r0, r1 = w_rings[i_w], w_rings[i_w + 1]
+            for k in range(4):
+                kn = (k + 1) % 4
+                bm_wp.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
+        bm_wp.faces.new((w_rings[0][0], w_rings[0][3], w_rings[0][2], w_rings[0][1]))
+        bm_wp.faces.new((w_rings[-1][0], w_rings[-1][1], w_rings[-1][2], w_rings[-1][3]))
+        wp_ob = bmesh_to_object(f'Wiper_{w_lbl}', bm_wp, material=mats['piano_black'],
+                                smooth=True, collection=collection, bevel=0.0012, bevel_segs=1)
+        uv_box(wp_ob, scale=10.0)
+        wp_ob.parent = body_ob
+        wp_ob.matrix_parent_inverse = body_ob.matrix_world.inverted()
+        objs.append(wp_ob)
 
     return roof_ob, objs
 
@@ -2058,22 +2139,30 @@ def build_wheel(tag, axle_x, side, mats, collection, body_ob=None):
     hw = WHEEL_WIDTH / 2.0
     r_bead = 0.242
 
-    # 1. Тороидальная шина со скруглёнными боковинами (полая внутри под спицы)
+    # 1. Тороидальная шина со скруглёнными плечами, защитным бортиком обода и 4 канавками протектора
     bm_tire = bmesh.new()
     r_out = WHEEL_R
+    r_grv = WHEEL_R - 0.0065
     r_sh = WHEEL_R - 0.015
     r_sh2 = WHEEL_R - 0.036
     r_mid = 0.5 * (r_bead + r_out)
     tire_profile = [
         (r_bead, -hw * 0.88),
-        (r_mid, -hw * 1.01),
+        (r_bead + 0.010, -hw * 0.95),  # защитный бортик обода
+        (r_mid, -hw * 1.02),
         (r_sh2, -hw * 1.00),
-        (r_sh, -hw * 0.94),
+        (r_sh, -hw * 0.93),
         (r_out, -hw * 0.76),
+        # 4 продольные водоотводящие канавки протектора
+        (r_out, -hw * 0.50), (r_grv, -hw * 0.47), (r_grv, -hw * 0.42), (r_out, -hw * 0.39),
+        (r_out, -hw * 0.16), (r_grv, -hw * 0.13), (r_grv, -hw * 0.08), (r_out, -hw * 0.05),
+        (r_out, +hw * 0.05), (r_grv, +hw * 0.08), (r_grv, +hw * 0.13), (r_out, +hw * 0.16),
+        (r_out, +hw * 0.39), (r_grv, +hw * 0.42), (r_grv, +hw * 0.47), (r_out, +hw * 0.50),
         (r_out, +hw * 0.76),
-        (r_sh, +hw * 0.94),
+        (r_sh, +hw * 0.93),
         (r_sh2, +hw * 1.00),
-        (r_mid, +hw * 1.01),
+        (r_mid, +hw * 1.02),
+        (r_bead + 0.010, +hw * 0.95),
         (r_bead, +hw * 0.88),
     ]
     _add_y_annulus(bm_tire, r_bead, r_out, -hw, hw, seg=seg, profile=tire_profile)
@@ -2083,49 +2172,101 @@ def build_wheel(tag, axle_x, side, mats, collection, body_ob=None):
     uv_cyl(tire, WHEEL_R, WHEEL_WIDTH)
     tire.location = Vector((axle_x, cy, cz))
 
-    # 2. 10-спицевый легкосплавный диск (обод + ступица + 5 сдвоенных спиц)
+    # 2. 19" двухцветный 10-спицевый диск Volvo S90 Inscription Diamond-Cut:
+    # slot 0 = Alloy (полированные лицевые грани спиц и наружная кромка обода),
+    # slot 1 = Piano_Black (тёмный барабан обода, боковины спиц и центральный колпачок),
+    # slot 2 = Chrome (5 объёмных колёсных гаек и хромированное кольцо ступицы)
     bm_rim = bmesh.new()
-    # Внешний обод (бочка диска)
-    _add_y_annulus(bm_rim, 0.224, 0.244, -hw * 0.88, hw * 0.88, seg=seg)
-    # Центральная ступица (колпачок)
-    y_face = side * (hw * 0.62)
-    y_hub_in = side * (hw * 0.12)
-    _add_y_cylinder(bm_rim, 0.064, min(y_hub_in, y_face), max(y_hub_in, y_face),
+    # 2a. Внутренний глянцево-чёрный барабан обода (slot 1 = Piano_Black)
+    _add_y_annulus(bm_rim, 0.222, 0.244, -hw * 0.88, hw * 0.80, seg=seg)
+    bm_rim.faces.ensure_lookup_table()
+    for f_b in bm_rim.faces:
+        f_b.material_index = 1
+
+    # 2b. Полированный лицевой кант обода Diamond-Cut (slot 0 = Alloy)
+    n_before_lip = len(bm_rim.faces)
+    y_lip0 = side * (hw * 0.72)
+    y_lip1 = side * (hw * 0.89)
+    _add_y_annulus(bm_rim, 0.224, 0.245, min(y_lip0, y_lip1), max(y_lip0, y_lip1), seg=seg)
+    bm_rim.faces.ensure_lookup_table()
+    for f_idx in range(n_before_lip, len(bm_rim.faces)):
+        bm_rim.faces[f_idx].material_index = 0
+
+    # 2c. Компактная ступица (утопленная чаша под болты + чёрный центральный колпачок)
+    n_before_hub = len(bm_rim.faces)
+    y_hub_in = side * (hw * 0.14)
+    y_hub_mid = side * (hw * 0.46)
+    y_cap_out = side * (hw * 0.56)
+    # Основание ступицы под 5 болтов (Alloy)
+    _add_y_cylinder(bm_rim, 0.068, min(y_hub_in, y_hub_mid), max(y_hub_in, y_hub_mid),
+                    seg=24, center_xz=(0.0, 0.0))
+    bm_rim.faces.ensure_lookup_table()
+    for f_idx in range(n_before_hub, len(bm_rim.faces)):
+        bm_rim.faces[f_idx].material_index = 0
+    # Компактный глянцево-чёрный центральный колпачок (r = 0.034, slot 1 = Piano_Black)
+    n_before_cap = len(bm_rim.faces)
+    _add_y_cylinder(bm_rim, 0.034, min(y_hub_mid, y_cap_out), max(y_hub_mid, y_cap_out),
                     seg=20, center_xz=(0.0, 0.0))
-    # 5 сдвоенных (10) объёмных спиц, слегка выгнутых к наружной кромке обода
+    bm_rim.faces.ensure_lookup_table()
+    for f_idx in range(n_before_cap, len(bm_rim.faces)):
+        bm_rim.faces[f_idx].material_index = 1
+    # Хромированное колечко вокруг колпачка + 5 объёмных колёсных гаек (slot 2 = Chrome)
+    n_before_lugs = len(bm_rim.faces)
+    y_ring0 = side * (hw * 0.50)
+    y_ring1 = side * (hw * 0.57)
+    _add_y_annulus(bm_rim, 0.032, 0.038, min(y_ring0, y_ring1), max(y_ring0, y_ring1), seg=24)
+    y_lug0 = side * (hw * 0.44)
+    y_lug1 = side * (hw * 0.55)
+    for k_lug in range(5):
+        a_l = 2.0 * math.pi * k_lug / 5.0
+        _add_y_cylinder(bm_rim, 0.0085, min(y_lug0, y_lug1), max(y_lug0, y_lug1),
+                        seg=6, center_xz=(0.052 * math.cos(a_l), 0.052 * math.sin(a_l)))
+    bm_rim.faces.ensure_lookup_table()
+    for f_idx in range(n_before_lugs, len(bm_rim.faces)):
+        bm_rim.faces[f_idx].material_index = 2
+
+    # 2d. 10 длинных стройных двухцветных V-спиц (вогнутый профиль от r=0.044 к ободу r=0.226):
+    # наружная лицевая грань = полированный Alloy [0], боковые грани = Piano_Black [1]
     for pair_idx in range(5):
         base_ang = 2.0 * math.pi * pair_idx / 5.0
-        for split in (-0.17, +0.17):
-            ang = base_ang + split
-            rad_dir = Vector((math.cos(ang), 0.0, math.sin(ang)))
-            tan_dir = Vector((-math.sin(ang), 0.0, math.cos(ang)))
+        for split in (-0.20, +0.20):
+            ang_in = base_ang + split * 0.52
+            ang_out = base_ang + split * 1.18
             y_dir = Vector((0.0, side, 0.0))
-            pts = [
-                rad_dir * 0.068 + y_dir * (hw * 0.44),
-                rad_dir * 0.145 + y_dir * (hw * 0.68),
-                rad_dir * 0.220 + y_dir * (hw * 0.72),
+            sp_specs = [
+                (0.044, ang_in, hw * 0.42, 0.0095, 0.011),
+                (0.115, 0.5 * (ang_in + ang_out), hw * 0.62, 0.0085, 0.012),
+                (0.175, ang_out * 0.85 + ang_in * 0.15, hw * 0.74, 0.0075, 0.011),
+                (0.226, ang_out, hw * 0.79, 0.0070, 0.010),
             ]
             rings = []
-            for idx_p, p in enumerate(pts):
-                sw = 0.0115 * (1.0 - 0.18 * idx_p)
-                sd = 0.013
+            for r_s, a_s, y_s, sw, sd in sp_specs:
+                rad_d = Vector((math.cos(a_s), 0.0, math.sin(a_s)))
+                tan_d = Vector((-math.sin(a_s), 0.0, math.cos(a_s)))
+                p = rad_d * r_s + y_dir * y_s
                 rings.append([
-                    bm_rim.verts.new(p - tan_dir * sw - y_dir * sd),
-                    bm_rim.verts.new(p + tan_dir * sw - y_dir * sd),
-                    bm_rim.verts.new(p + tan_dir * sw + y_dir * sd),
-                    bm_rim.verts.new(p - tan_dir * sw + y_dir * sd),
+                    bm_rim.verts.new(p - tan_d * sw - y_dir * sd),
+                    bm_rim.verts.new(p + tan_d * sw - y_dir * sd),
+                    bm_rim.verts.new(p + tan_d * (sw * 0.82) + y_dir * sd),
+                    bm_rim.verts.new(p - tan_d * (sw * 0.82) + y_dir * sd),
                 ])
             for i_s in range(len(rings) - 1):
                 r0, r1 = rings[i_s], rings[i_s + 1]
                 for k in range(4):
                     kn = (k + 1) % 4
-                    bm_rim.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
-            bm_rim.faces.new((rings[0][0], rings[0][3], rings[0][2], rings[0][1]))
-            bm_rim.faces.new((rings[-1][0], rings[-1][1], rings[-1][2], rings[-1][3]))
+                    f_sp = bm_rim.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
+                    # k == 2 — наружная лицевая грань спицы (Diamond-Cut Alloy), остальные чёрные
+                    f_sp.material_index = 0 if k == 2 else 1
+            f_e0 = bm_rim.faces.new((rings[0][0], rings[0][3], rings[0][2], rings[0][1]))
+            f_e1 = bm_rim.faces.new((rings[-1][0], rings[-1][1], rings[-1][2], rings[-1][3]))
+            f_e0.material_index = 1
+            f_e1.material_index = 1
 
     rim = bmesh_to_object(f'Rim_{tag}', bm_rim, material=mats['alloy'],
                           smooth=True, collection=collection, auto_smooth_deg=50.0,
-                          bevel=0.0018, bevel_segs=2)
+                          bevel=0.0014, bevel_segs=2)
+    rim.data.materials.append(mats['piano_black'])
+    rim.data.materials.append(mats['chrome'])
     uv_box(rim, scale=4.0)
     rim.parent = tire
     rim.location = Vector((0.0, 0.0, 0.0))
@@ -2801,9 +2942,8 @@ def build_trunk(body_ob, mats, collection):
             x_back_edge = rear_tail_surface_x(y)
             x = x_start * (1.0 - u_x) + x_back_edge * u_x
             edge_drop = 0.008 * (abs(v) ** 2.6) * (1.0 - 0.35 * t_taper)
-            # Мягкий «утиный хвостик» в центре багажника, сходящий в 0 на боковых швах v=±1
-            # (крышка идеально заподлицо с задними крыльями Fender_Rear!)
-            lip_kick = 0.006 * (max(0.0, (u_x - 0.76) / 0.24) ** 1.6) * (1.0 - v * v)
+            # Выразительный купеобразный «утиный хвостик» (ducktail lip), сходящий в 0 на швах
+            lip_kick = 0.011 * (max(0.0, (u_x - 0.72) / 0.28) ** 1.55) * (1.0 - v * v)
             z_top = trunk_deck_z(x, y) - edge_drop + lip_kick
             p_out = Vector((x - TRUNK_HINGE_X, y, z_top - hz))
             p_in = Vector((x - TRUNK_HINGE_X, y, z_top - TRUNK_LID_THICKNESS - hz))
@@ -2813,8 +2953,9 @@ def build_trunk(body_ob, mats, collection):
         inner.append(row_in)
 
     # Полновысотная вертикальная задняя панель крышки багажника (между фонарями до бампера!)
+    # с фирменной трапециевидной утопленной нишей под номерной знак Volvo S90!
     z_bot_lid = REAR_BUMPER_TOP_Z + 0.008  # зазор 8 мм над верхней полкой заднего бампера
-    n_drop = 7
+    n_drop = 9
     lip_top_z = []
     lip_x_by_j = []
     for j in range(ny):
@@ -2822,7 +2963,9 @@ def build_trunk(body_ob, mats, collection):
         y = v * TRUNK_TAIL_HALF_Y
         xb = rear_tail_surface_x(y)
         lip_x_by_j.append(xb)
-        lip_top_z.append(trunk_deck_z(xb, y) - 0.009 * (abs(v) ** 3.0) + 0.002)
+        lip_top_z.append(
+            trunk_deck_z(xb, y) - 0.009 * (abs(v) ** 3.0) + 0.011 * (1.0 - v * v)
+        )
 
     for step in range(1, n_drop + 1):
         frac = step / float(n_drop)
@@ -2832,8 +2975,20 @@ def build_trunk(body_ob, mats, collection):
             v = -1.0 + 2.0 * j / (ny - 1)
             y = v * TRUNK_TAIL_HALF_Y
             z_cur = lip_top_z[j] * (1.0 - frac) + z_bot_lid * frac
-            # Лёгкий характерный наклон/подгиб кормы Volvo S90 (ниша номерного знака)
-            x_cur = lip_x_by_j[j] - 0.012 * math.sin(math.pi * frac) + 0.010 * frac
+            # Трапециевидная ниша номерного знака (глубже на +18 мм внутрь по +X)
+            ay = abs(y)
+            y_niche = 0.275 - 0.025 * frac
+            w_y = 1.0 - clamp((ay - (y_niche - 0.035)) / 0.045, 0.0, 1.0)
+            w_y = w_y * w_y * (3.0 - 2.0 * w_y)
+            w_z_hi = clamp((frac - 0.22) / 0.14, 0.0, 1.0)
+            w_z_lo = 1.0 - clamp((frac - 0.78) / 0.14, 0.0, 1.0)
+            niche_recess = 0.018 * w_y * w_z_hi * w_z_lo
+            x_cur = (
+                lip_x_by_j[j]
+                - 0.010 * math.sin(math.pi * frac)
+                + 0.010 * frac
+                + niche_recess
+            )
             row_out.append(bm_lid.verts.new(Vector((x_cur - TRUNK_HINGE_X, y, z_cur - hz))))
             row_in.append(bm_lid.verts.new(Vector((
                 x_cur + TRUNK_LID_THICKNESS - TRUNK_HINGE_X, y, z_cur - hz))))
@@ -2869,14 +3024,56 @@ def build_trunk(body_ob, mats, collection):
             rear_tail_surface_x(0.0) + TRUNK_LID_THICKNESS + 0.036 - TRUNK_HINGE_X,
             -0.028, 0.028, z_bot_lid + 0.010 - hz, z_bot_lid + 0.035 - hz)
 
+    # Хромированная планка-ручка над нишей номерного знака (slot 1 = Chrome)
+    n_before_tr_chrome = len(bm_lid.faces)
+    z_bar_w = lip_top_z[ny // 2] * 0.72 + z_bot_lid * 0.28
+    x_bar_w = rear_tail_surface_x(0.0) - 0.018
+    add_box(bm_lid,
+            x_bar_w - 0.010 - TRUNK_HINGE_X, x_bar_w + 0.010 - TRUNK_HINGE_X,
+            -0.255, +0.255, z_bar_w - 0.0075 - hz, z_bar_w + 0.0075 - hz)
+    bm_lid.faces.ensure_lookup_table()
+    for f_idx in range(n_before_tr_chrome, len(bm_lid.faces)):
+        bm_lid.faces[f_idx].material_index = 1
+
     trunk_lid = bmesh_to_object('Trunk_Lid', bm_lid, material=mats['paint'],
                                 smooth=True, collection=collection, auto_smooth_deg=55.0,
                                 bevel=0.003, bevel_segs=2, subsurf=1)
+    trunk_lid.data.materials.append(mats['chrome'])
     uv_box(trunk_lid, scale=1.0)
     trunk_lid.location = hinge_origin
     trunk_lid.parent = body_ob
     trunk_lid.matrix_parent_inverse = body_ob.matrix_world.inverted()
     objs.append(trunk_lid)
+
+    # 2b. Европейский задний номерной знак внутри ниши багажника (открывается вместе с Trunk_Lid!)
+    bm_pl_r = bmesh.new()
+    z_pl_c = lip_top_z[ny // 2] * 0.44 + z_bot_lid * 0.56 - hz
+    x_pl_r = rear_tail_surface_x(0.0) + 0.009 - TRUNK_HINGE_X
+    # Тонкая чёрная рамка (slot 1 = Piano_Black)
+    add_box(bm_pl_r, x_pl_r - 0.003, x_pl_r + 0.005, -0.245, +0.245, z_pl_c - 0.056, z_pl_c + 0.056)
+    bm_pl_r.faces.ensure_lookup_table()
+    for f_p in bm_pl_r.faces:
+        f_p.material_index = 1
+    # Белое поле номера (slot 0 = White)
+    n_bef_w = len(bm_pl_r.faces)
+    add_box(bm_pl_r, x_pl_r - 0.006, x_pl_r - 0.002, -0.236, +0.236, z_pl_c - 0.048, z_pl_c + 0.048)
+    bm_pl_r.faces.ensure_lookup_table()
+    for f_idx in range(n_bef_w, len(bm_pl_r.faces)):
+        bm_pl_r.faces[f_idx].material_index = 0
+    # Синяя евро-полоска с левого края (slot 2 = Paint)
+    n_bef_eu = len(bm_pl_r.faces)
+    add_box(bm_pl_r, x_pl_r - 0.007, x_pl_r - 0.004, +0.192, +0.236, z_pl_c - 0.048, z_pl_c + 0.048)
+    bm_pl_r.faces.ensure_lookup_table()
+    for f_idx in range(n_bef_eu, len(bm_pl_r.faces)):
+        bm_pl_r.faces[f_idx].material_index = 2
+    pl_r = bmesh_to_object('License_Plate_Rear', bm_pl_r, material=mats['white'],
+                           smooth=True, collection=collection, bevel=0.0012, bevel_segs=1)
+    pl_r.data.materials.append(mats['piano_black'])
+    pl_r.data.materials.append(mats['paint'])
+    uv_box(pl_r, scale=5.0)
+    pl_r.parent = trunk_lid
+    pl_r.location = Vector((0.0, 0.0, 0.0))
+    objs.append(pl_r)
 
     # 3. Петли багажника («гусиная шея») и телескопические газовые лифты (слева и справа)
     bx, bz = TRUNK_LIFT_BODY_XZ
@@ -3084,9 +3281,16 @@ def build_hood(body_ob, mats, collection):
             t_f = t_f * t_f * (3.0 - 2.0 * t_f)
             x = x_nom * (1.0 - t_f) + (x_start + (x_front_edge - x_start) * u_x) * t_f
             edge_drop = 0.014 * (abs(v) ** 2.8)
+            # Фирменные V-образные силовые рёбра жёсткости на капоте Volvo S90 (power creases)
+            y_crease = 0.50 * (1.0 - u_x) + 0.34 * u_x
+            crease_fade = math.sin(math.pi * clamp((u_x - 0.06) / 0.86, 0.0, 1.0))
+            power_crease = 0.009 * crease_fade * math.exp(-(((abs(y) - y_crease) / 0.065) ** 2))
             # Плавный передний клюв капота S90: мягко спускается прямо к верху решётки и фар
             nose_drop = 0.052 * (max(0.0, (u_x - 0.68) / 0.32) ** 1.70)
-            z_top = hood_deck_z(min(x, X_MAX - 0.05), y) - edge_drop - nose_drop + 0.001
+            z_top = (
+                hood_deck_z(min(x, X_MAX - 0.05), y)
+                - edge_drop - nose_drop + power_crease + 0.001
+            )
             row_out.append(Vector((x - HOOD_HINGE_X, y, z_top - hz)))
             row_in.append(Vector((x - HOOD_HINGE_X, y, z_top - HOOD_LID_THICKNESS - hz)))
         outer_pts.append(row_out)
@@ -3406,11 +3610,14 @@ def build_volvo_details(body_ob, mats, collection):
     uv_box(gc_ob, scale=6.0)
     objs.append(gc_ob)
 
-    # 2. Контурный нижний воздухозаборник и боковые «карманы» переднего бампера Volvo S90
+    # 2. Контурный нижний воздухозаборник, горизонтальные ламели, LED-ПТФ и передний номер
     bm_in = bmesh.new()
-    # Центральная нижняя трапециевидная решётка
+    # Центральная нижняя трапециевидная решётка + 2 горизонтальные аэродинамические ламели
     _add_curved_strip(bm_in, -0.38, 0.38, 0.258, 0.365, front=True,
                       off_out=0.008, thick=0.022, ny=13, nz=4)
+    for z_sl in (0.285, 0.330):
+        _add_curved_strip(bm_in, -0.37, 0.37, z_sl - 0.006, z_sl + 0.006, front=True,
+                          off_out=0.014, thick=0.014, ny=11, nz=2)
     # Левый и правый боковые воздухозаборники бампера (под фарами)
     for sy_i in (1.0, -1.0):
         ya_i, yb_i = sorted((sy_i * 0.43, sy_i * 0.67))
@@ -3423,6 +3630,44 @@ def build_volvo_details(body_ob, mats, collection):
                                 smooth=True, collection=collection, bevel=0.0025)
     uv_box(intake_ob, scale=3.0)
     objs.append(intake_ob)
+
+    # 2b. Светодиодные противотуманки в боковых воздухозаборниках (снимаются с Front_Bumper!)
+    for f_lbl, sy_f in (('L', 1.0), ('R', -1.0)):
+        bm_fog = bmesh.new()
+        ya_f, yb_f = sorted((sy_f * 0.56, sy_f * 0.65))
+        _add_curved_strip(bm_fog, ya_f, yb_f, 0.286, 0.302, front=True,
+                          off_out=0.015, thick=0.010, ny=5, nz=2)
+        fog_ob = bmesh_to_object(f'Fog_Light_{f_lbl}', bm_fog, material=mats['drl'],
+                                 smooth=True, collection=collection, bevel=0.0012, bevel_segs=1)
+        uv_box(fog_ob, scale=8.0)
+        objs.append(fog_ob)
+
+    # 2c. Европейский передний номерной знак на переднем бампере (снимается с Front_Bumper!)
+    bm_pl_f = bmesh.new()
+    sx_pf = _surf_x(0.0, 0.395, front=True)
+    # Чёрная рамка-подиум (slot 1 = Piano_Black)
+    add_box(bm_pl_f, sx_pf - 0.006, sx_pf + 0.018, -0.245, +0.245, 0.352, 0.452)
+    bm_pl_f.faces.ensure_lookup_table()
+    for f_p in bm_pl_f.faces:
+        f_p.material_index = 1
+    # Белое поле номера (slot 0 = White)
+    n_bf_w = len(bm_pl_f.faces)
+    add_box(bm_pl_f, sx_pf + 0.016, sx_pf + 0.022, -0.236, +0.236, 0.359, 0.445)
+    bm_pl_f.faces.ensure_lookup_table()
+    for f_idx in range(n_bf_w, len(bm_pl_f.faces)):
+        bm_pl_f.faces[f_idx].material_index = 0
+    # Синяя евро-полоска слева спереди (-Y — левый край номера для зрителя, slot 2 = Paint)
+    n_bf_eu = len(bm_pl_f.faces)
+    add_box(bm_pl_f, sx_pf + 0.018, sx_pf + 0.023, -0.236, -0.192, 0.359, 0.445)
+    bm_pl_f.faces.ensure_lookup_table()
+    for f_idx in range(n_bf_eu, len(bm_pl_f.faces)):
+        bm_pl_f.faces[f_idx].material_index = 2
+    pl_f = bmesh_to_object('License_Plate_Front', bm_pl_f, material=mats['white'],
+                           smooth=True, collection=collection, bevel=0.0012, bevel_segs=1)
+    pl_f.data.materials.append(mats['piano_black'])
+    pl_f.data.materials.append(mats['paint'])
+    uv_box(pl_f, scale=5.0)
+    objs.append(pl_f)
 
     # 3. Огибающие блок-фары Volvo «Молот Тора» — жёстко установлены на каркасе кузова
     # (Radiator_Support): огибают передний угол крыла до y=0.775, плотно заполняя нишу
@@ -4059,6 +4304,9 @@ def main(argv=None):
         'Grille_Front': front_bumper,
         'Grille_Chrome': front_bumper,
         'Bumper_Intake_Front': front_bumper,
+        'Fog_Light_L': front_bumper,
+        'Fog_Light_R': front_bumper,
+        'License_Plate_Front': front_bumper,
         'Rear_Diffuser': rear_bumper,
         'Exhaust_L': rear_bumper,
         'Exhaust_R': rear_bumper,

@@ -232,15 +232,17 @@ def side_surface_y(x, z):
     z0 = ZB(x)
     belt = BELT(x)
     v = clamp((z - z0) / max(belt - z0, 0.10), 0.0, 1.0)
-    # Скульптурный профиль: поднутрение снизу (0.91), лёгкая выемка в нижней трети,
-    # полная «мускулистая» середина (1.00) и выраженная плечевая грань у пояса (0.975)
-    tuck_bot = 0.91 + 0.09 * math.sin(0.5 * math.pi * clamp(v / 0.45, 0.0, 1.0))
+    # Скульптурный профиль: поднутрение снизу (0.90), выраженный нижний световой подхват
+    # (concave rocker cove), полная «мускулистая» середина + чёткое плечевое ребро Volvo S90
+    tuck_bot = 0.905 + 0.095 * math.sin(0.5 * math.pi * clamp(v / 0.44, 0.0, 1.0))
     cove = (
-        -0.014 * math.sin(math.pi * clamp((v - 0.12) / 0.36, 0.0, 1.0))
-        if 0.12 < v < 0.48 else 0.0
+        -0.022 * math.sin(math.pi * clamp((v - 0.11) / 0.35, 0.0, 1.0))
+        if 0.11 < v < 0.46 else 0.0
     )
-    shoulder = -0.025 * (max(0.0, (v - 0.78) / 0.22) ** 1.6)
-    return w * (tuck_bot + cove + shoulder)
+    # Характерное плечевое ребро (character line) на высоте v ~ 0.78
+    char_ridge = 0.010 * math.exp(-(((v - 0.78) / 0.09) ** 2))
+    shoulder = -0.030 * (max(0.0, (v - 0.79) / 0.21) ** 1.55)
+    return w * (tuck_bot + cove + char_ridge + shoulder)
 
 
 def WR(x):
