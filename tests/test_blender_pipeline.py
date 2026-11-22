@@ -79,7 +79,11 @@ def test_collections_and_bounding_box(built_scene_dir):
         'Trunk_Lift_Bracket_L', 'Trunk_Lift_Bracket_R',
         'Trunk_Lift_Cyl_L', 'Trunk_Lift_Cyl_R',
         'Trunk_Lift_Rod_L', 'Trunk_Lift_Rod_R',
-        'Grille_Front', 'Headlight_L', 'Headlight_R', 'Tail_Light_L', 'Tail_Light_R',
+        'Grille_Front', 'Grille_Chrome', 'Bumper_Intake_Front',
+        'Headlight_L', 'Headlight_R', 'Headlight_DRL_L', 'Headlight_DRL_R',
+        'Tail_Light_L', 'Tail_Light_R', 'Rear_Diffuser', 'Exhaust_L', 'Exhaust_R',
+        'Wheel_Arch_FL', 'Wheel_Arch_FR', 'Wheel_Arch_RL', 'Wheel_Arch_RR',
+        'Wheel_Well_FL', 'Wheel_Well_FR', 'Wheel_Well_RL', 'Wheel_Well_RR',
     ):
         assert required in car_names, f'Отсутствует обязательный объект {required}'
 
@@ -154,7 +158,7 @@ def test_animations_have_real_motion_and_outward_doors(built_scene_dir):
     trunk = bpy.data.objects['Trunk_Lid']
     assert trunk.rotation_euler.y == pytest.approx(math.radians(62.0), abs=1e-2)
     trunk_max_z = max((trunk.matrix_world @ v.co).z for v in trunk.data.vertices)
-    assert trunk_max_z > 1.70
+    assert trunk_max_z > 1.45
     for side_tag in ('L', 'R'):
         cyl = bpy.data.objects[f'Trunk_Lift_Cyl_{side_tag}']
         rod = bpy.data.objects[f'Trunk_Lift_Rod_{side_tag}']

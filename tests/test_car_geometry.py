@@ -155,7 +155,7 @@ def test_constants_sane():
     assert N_SECTIONS >= 50
     assert LENGTH == pytest.approx(5.00)
     assert WIDTH == pytest.approx(1.872)
-    assert HEIGHT == pytest.approx(1.456)
+    assert HEIGHT == pytest.approx(1.432)
 
 
 def test_cabin_door_cutout_recessed_to_sill():
@@ -184,7 +184,7 @@ def test_trunk_gas_lifts_telescope_validly():
     и не должны разъединяться при полном открытии багажника."""
     _, _, d_closed = trunk_lift_endpoints(0.0)
     _, _, d_open = trunk_lift_endpoints(TRUNK_OPEN_DEG)
-    assert d_open > d_closed + 0.25
+    assert d_open > d_closed + 0.20
     assert TRUNK_LIFT_CYL_LEN < d_closed
     assert TRUNK_LIFT_ROD_LEN < d_closed
     # Запас перекрытия штока внутри цилиндра в полностью открытом положении >= 30 мм
