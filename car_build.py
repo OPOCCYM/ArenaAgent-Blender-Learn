@@ -1081,36 +1081,34 @@ def build_front_structure_and_panels(body_ob, mats, collection):
                 (x - (HOOD_X_REAR + 0.006)) / max(FENDER_X_FRONT - HOOD_X_REAR, 0.1),
                 0.0, 1.0,
             )
-            f_nose_drop = 0.036 * (max(0.0, (u_hx - 0.72) / 0.28) ** 1.8)
+            f_nose_drop = 0.044 * (max(0.0, (u_hx - 0.70) / 0.30) ** 1.75)
             z_hood_edge = hood_deck_z(x, y_hood_edge) - 0.014 - f_nose_drop
             y_flange = WR(x) + 0.004     # загнутая внутрь монтажная полка под капотом
             z_flange = z_hood_edge - 0.034
 
             # 12 точек по профилю сечения крыла:
-            # 0..6 — борт от нижней кромки/арки до плеча BELT;
+            # 0..6 — борт от нижней кромки/арки до плеча BELT (строго по side_surface_y,
+            #        без искусственного замятия за аркой -> идеально заподлицо с Door_Front!);
             # 7..9 — скруглённый верхний гребень крыла к линии капота;
             # 10..11 — загнутый внутрь монтажный фланец крыла (виден при открытом капоте!)
-            t_sill = clamp((1.24 - x) / 0.18, 0.0, 1.0)
-            t_sill = t_sill * t_sill * (3.0 - 2.0 * t_sill)
-            # Плавное скругление переднего угла крыла (x > 2.12) в тон обтекаемому бамперу
-            t_fcorn = clamp((x - 2.12) / max(FENDER_X_FRONT - 2.12, 0.05), 0.0, 1.0)
-            y_ftuck = 1.0 - 0.038 * (t_fcorn ** 2.0)
-            z_fdrop = 0.028 * (t_fcorn ** 1.8)
+            # Плавное скругление и опускание переднего угла крыла (x > 2.08) точно к верху фары
+            t_fcorn = clamp((x - 2.08) / max(FENDER_X_FRONT - 2.08, 0.05), 0.0, 1.0)
+            t_fcorn_s = t_fcorn * t_fcorn * (3.0 - 2.0 * t_fcorn)
+            y_ftuck = 1.0 - 0.034 * (t_fcorn ** 2.0)
+            z_fdrop = 0.052 * t_fcorn_s
             profile = []
             for j in range(7):
                 u = j / 6.0
                 zz = zb_f + (belt_x - z_fdrop - zb_f) * u
-                # Плавный подгиб нижней юбки порога внутрь без резкого скачка у арки
-                sill_tuck = 1.0 - 0.022 * t_sill * ((1.0 - u) ** 2.4)
-                yy = side_surface_y(x, zz) * sill_tuck * y_ftuck
+                yy = side_surface_y(x, zz) * y_ftuck
                 profile.append((yy, zz))
             for k in range(1, 4):
                 u = k / 3.0
                 yy = (y_belt * y_ftuck) * (1.0 - u) + y_hood_edge * u
                 zz = (
                     (belt_x - z_fdrop)
-                    + (z_hood_edge - (belt_x - z_fdrop)) * (u ** 0.72)
-                    + 0.006 * math.sin(math.pi * u)
+                    + (z_hood_edge - (belt_x - z_fdrop)) * (u ** 0.70)
+                    + 0.007 * math.sin(math.pi * u)
                 )
                 profile.append((yy, zz))
             # Загнутый внутрь фланец крепления крыла на брызговике
@@ -1119,14 +1117,27 @@ def build_front_structure_and_panels(body_ob, mats, collection):
 
             row_out = []
             row_in = []
+            # На самом переднем участке крыла (x > 2.12) верхняя часть крыла (над фарой)
+            # плавно повторяет дугу носа front_nose_surface_x(yy) в одну непрерывную линию
+            # с передней кромкой Hood_Lid — полностью закрывая карман над наружным углом фары!
+            t_nose_wrap = clamp((x - 2.12) / max(FENDER_X_FRONT - 2.12, 0.05), 0.0, 1.0)
+            t_nose_wrap = t_nose_wrap * t_nose_wrap * (3.0 - 2.0 * t_nose_wrap)
             for idx_p, (yy, zz) in enumerate(profile):
+                x_loc = x
+                if t_nose_wrap > 0.0 and idx_p >= 6:
+                    x_arc = front_nose_surface_x(yy) - 0.036
+                    if x_arc > x:
+                        # Плавный вес от 0 на плече (idx_p=6) к 1 на гребне у капота (idx_p=9..11)
+                        w_top = clamp((idx_p - 6) / 3.0, 0.0, 1.0)
+                        x_loc = x + (x_arc - x) * t_nose_wrap * (0.25 + 0.75 * w_top)
                 if idx_p < 7:
                     n_off = Vector((0.0, -side * FENDER_THICKNESS, 0.0))
                 elif idx_p < 10:
-                    n_off = Vector((0.0, -side * FENDER_THICKNESS * 0.55, -FENDER_THICKNESS * 0.85))
+                    n_off = Vector((0.0, -side * FENDER_THICKNESS * 0.55,
+                                    -FENDER_THICKNESS * 0.85))
                 else:
                     n_off = Vector((0.0, 0.0, -FENDER_THICKNESS * 0.80))
-                p_o = Vector((x, side * yy, zz))
+                p_o = Vector((x_loc, side * yy, zz))
                 row_out.append(p_o)
                 row_in.append(p_o + n_off)
             outer_pts.append(row_out)
@@ -1397,8 +1408,17 @@ def build_rear_structure_and_panels(body_ob, mats, collection):
             # в зоне заднего стекла (x > TRUNK_X_FRONT) аккуратно уходит под стойку C / форточку.
             t_trunk = clamp((TRUNK_X_FRONT + 0.04 - x) / 0.10, 0.0, 1.0)
             t_trunk = t_trunk * t_trunk * (3.0 - 2.0 * t_trunk)
-            y_edge_tr = WR(x) + 0.038  # зазор ~6 мм до крышки багажника (WR + 0.032)
-            z_edge_tr = trunk_deck_z(x, y_edge_tr) - 0.009
+            # Повторяем точное сужение крышки багажника Trunk_Lid к проёму между фонарями,
+            # чтобы зазор оставался равномерным (~8 мм) до самой задней кромки!
+            u_tr_x = clamp((TRUNK_X_FRONT - x) / max(TRUNK_X_FRONT - REAR_FENDER_X_REAR, 0.1),
+                           0.0, 1.0)
+            t_tr_taper = clamp((u_tr_x - 0.72) / 0.28, 0.0, 1.0)
+            t_tr_taper = t_tr_taper * t_tr_taper * (3.0 - 2.0 * t_tr_taper)
+            y_edge_tr = (
+                (WR(x) + 0.040) * (1.0 - t_tr_taper)
+                + (TRUNK_TAIL_HALF_Y + 0.008) * t_tr_taper
+            )
+            z_edge_tr = trunk_deck_z(x, y_edge_tr) - 0.008
             y_edge_gh = y_belt - 0.048
             z_edge_gh = belt_x + 0.010
 
@@ -1408,18 +1428,24 @@ def build_rear_structure_and_panels(body_ob, mats, collection):
             z_flange = z_top_edge - (0.018 + 0.020 * t_trunk)
 
             profile = []
-            # Мягкий заворот самого заднего ребра крыла (x < -2.22) в тон скруглению бампера
-            t_rcorn = clamp((-2.22 - x) / (-2.22 - REAR_FENDER_X_REAR), 0.0, 1.0)
-            y_tuck = 1.0 - 0.042 * (t_rcorn ** 2.0)
+            # Мягкий заворот и лёгкий спад заднего угла крыла (x < -2.18) без «квадратного» ребра
+            t_rcorn = clamp((-2.18 - x) / (-2.18 - REAR_FENDER_X_REAR), 0.0, 1.0)
+            y_tuck = 1.0 - 0.040 * (t_rcorn ** 2.0)
+            z_rdrop = 0.014 * (t_rcorn ** 1.8)
+            belt_loc = belt_x - z_rdrop
             for j in range(7):
                 u = j / 6.0
-                zz = zb_r + (belt_x - zb_r) * u
+                zz = zb_r + (belt_loc - zb_r) * u
                 yy = side_surface_y(x, zz) * y_tuck
                 profile.append((yy, zz))
-            for k in range(1, 4):
-                u = k / 3.0
+            for k in range(1, 5):
+                u = k / 4.0
                 yy = (y_belt * y_tuck) * (1.0 - u) + y_top_edge * u
-                zz = belt_x + (z_top_edge - belt_x) * (u ** 0.72) + 0.005 * math.sin(math.pi * u)
+                zz = (
+                    belt_loc
+                    + (z_top_edge - belt_loc) * (u ** 0.62)
+                    + 0.010 * math.sin(math.pi * u)
+                )
                 profile.append((yy, zz))
             # Загнутый внутрь водосточный желоб/фланец по краю проёма багажника
             profile.append((y_top_edge - 0.008, z_flange + 0.010))
@@ -1430,7 +1456,7 @@ def build_rear_structure_and_panels(body_ob, mats, collection):
             for idx_p, (yy, zz) in enumerate(profile):
                 if idx_p < 7:
                     n_off = Vector((0.0, -side * FENDER_THICKNESS, 0.0))
-                elif idx_p < 10:
+                elif idx_p < 11:
                     n_off = Vector((0.0, -side * FENDER_THICKNESS * 0.55,
                                     -FENDER_THICKNESS * 0.85))
                 else:
@@ -1447,9 +1473,9 @@ def build_rear_structure_and_panels(body_ob, mats, collection):
         c_in = []
         ny_c, nz_c = 7, 5
         y_c0 = TAIL_LIGHT_Y_IN - 0.002
-        y_c1 = side_surface_y(REAR_FENDER_X_REAR, BELT(REAR_FENDER_X_REAR)) * 0.968 - 0.010
+        y_c1 = side_surface_y(REAR_FENDER_X_REAR, BELT(REAR_FENDER_X_REAR)) * 0.960 - 0.010
         z_c0 = TAIL_LIGHT_Z_HI + 0.005
-        z_c1 = BELT(REAR_FENDER_X_REAR) - 0.010
+        z_c1 = BELT(REAR_FENDER_X_REAR) - 0.015
         for j in range(nz_c):
             vz = j / (nz_c - 1)
             zz = z_c0 + (z_c1 - z_c0) * vz
@@ -1655,24 +1681,29 @@ def build_roof_and_pillars(body_ob, mats, collection):
     соединяющих нижнюю ванну кузова (Body) с крышей вокруг сквозных дверных вырезов."""
     objs = []
 
-    # 1. Панель крыши (Roof): замкнутая изогнутая оболочка от ROOF_X_REAR до ROOF_X_FRONT
+    # 1. Панель крыши (Roof): замкнутая плавно выгнутая оболочка от ROOF_X_REAR до ROOF_X_FRONT
+    # с мягким загибом переднего и заднего кантов точно к верху лобового и заднего стёкол
     bm_roof = bmesh.new()
-    nx, ny = 18, 11
-    xs = [
-        (ROOF_X_REAR - 0.02) + ((ROOF_X_FRONT + 0.02) - (ROOF_X_REAR - 0.02)) * i / (nx - 1)
-        for i in range(nx)
-    ]
+    nx, ny = 20, 11
+    x_r0 = ROOF_X_REAR - 0.020
+    x_r1 = ROOF_X_FRONT + 0.020
+    xs = [x_r0 + (x_r1 - x_r0) * i / (nx - 1) for i in range(nx)]
     outer_pts = []
     inner_pts = []
-    for x in xs:
-        hw = WR(x) + 0.012
+    for idx_x, x in enumerate(xs):
+        u_x = idx_x / float(nx - 1)
+        hw = WR(x) + 0.010
         zr = ZR(x)
+        # Плавный продольный спад переднего и заднего кантов крыши вровень со стёклами/стойками
+        end_f = clamp((u_x - 0.82) / 0.18, 0.0, 1.0)
+        end_r = clamp((0.18 - u_x) / 0.18, 0.0, 1.0)
+        end_drop = 0.013 * (end_f * end_f + end_r * end_r)
         row_out = []
         row_in = []
         for j in range(ny):
             v = -1.0 + 2.0 * j / (ny - 1)
             y = v * hw
-            z_top = zr - 0.016 * (v * v)
+            z_top = zr - 0.013 * (v * v) - end_drop
             row_out.append(Vector((x, y, z_top)))
             row_in.append(Vector((x, y, z_top - ROOF_THICKNESS)))
         outer_pts.append(row_out)
@@ -1711,8 +1742,8 @@ def build_roof_and_pillars(body_ob, mats, collection):
             x_mid = 0.5 * (x_front_a + x_back_a)
             y_out, z_val = upper_side_yz(x_mid, t)
             if step == 7:
-                y_out = WR(ROOF_X_FRONT) + 0.004
-                z_val = ZR(ROOF_X_FRONT) - 0.016
+                y_out = WR(ROOF_X_FRONT) + 0.006
+                z_val = ZR(ROOF_X_FRONT) - 0.012
             else:
                 y_out += 0.004
             thick_y = 0.058 * (1.0 - 0.16 * t)
@@ -1747,8 +1778,8 @@ def build_roof_and_pillars(body_ob, mats, collection):
             if step == 0:
                 y_out -= 0.002
             elif step == 6:
-                y_out = WR(PILLAR_B_X) + 0.004
-                z_val = ZR(PILLAR_B_X) - 0.016
+                y_out = WR(PILLAR_B_X) + 0.006
+                z_val = ZR(PILLAR_B_X) - 0.012
             else:
                 y_out += 0.003
             thick_y = 0.052 * (1.0 - 0.18 * t)
@@ -1782,8 +1813,8 @@ def build_roof_and_pillars(body_ob, mats, collection):
             if step == 0:
                 y_out -= 0.014
             elif step == 7:
-                y_out = WR(ROOF_X_REAR) + 0.004
-                z_val = ZR(ROOF_X_REAR) - 0.016
+                y_out = WR(ROOF_X_REAR) + 0.006
+                z_val = ZR(ROOF_X_REAR) - 0.012
             else:
                 y_out += 0.004
             thick_y = 0.064 * (1.0 - 0.18 * t)
@@ -1839,10 +1870,10 @@ def build_glass(mats, collection):
         x_bot=WINDSHIELD_X_BOT,
         z_bot=BELT(WINDSHIELD_X_BOT) + 0.004,
         y_bot=side_surface_y(WINDSHIELD_X_BOT, BELT(WINDSHIELD_X_BOT)) * 0.98,
-        x_top=ROOF_X_FRONT + 0.012,
-        z_top=ZR(ROOF_X_FRONT) - 0.018,
+        x_top=ROOF_X_FRONT + 0.014,
+        z_top=ZR(ROOF_X_FRONT) - 0.010,
         y_top=WR(ROOF_X_FRONT) * 0.98,
-        bulge_x=+0.024,
+        bulge_x=+0.022,
     )
 
     # Заднее стекло (между стойками C, боковые края заходят в паз Pillar_C без зазора)
@@ -1850,10 +1881,10 @@ def build_glass(mats, collection):
         x_bot=REAR_GLASS_X_BOT,
         z_bot=BELT(REAR_GLASS_X_BOT) + 0.024,
         y_bot=side_surface_y(REAR_GLASS_X_BOT, BELT(REAR_GLASS_X_BOT)) * 0.95,
-        x_top=ROOF_X_REAR - 0.005,
-        z_top=ZR(ROOF_X_REAR) - 0.018,
+        x_top=ROOF_X_REAR - 0.008,
+        z_top=ZR(ROOF_X_REAR) - 0.010,
         y_top=WR(ROOF_X_REAR) * 0.97,
-        bulge_x=-0.022,
+        bulge_x=-0.020,
     )
 
     # Задние боковые форточки (C-pillar quarter glass — удлинённый купеобразный силуэт окон S90)
@@ -1871,8 +1902,9 @@ def build_glass(mats, collection):
                 u = i / (nu_q - 1)
                 x_g = xf_t * (1.0 - u) + xb_t * u
                 y_abs, z_g = upper_side_yz(x_g, t)
-                y_o = side * (y_abs + 0.006)
-                y_i = side * (y_abs + 0.001)
+                # В одной плоскости с дверными стёклами и пазом Pillar_C (не торчит наружу!)
+                y_o = side * (y_abs - 0.004)
+                y_i = side * (y_abs - 0.009)
                 row_o.append(Vector((x_g, y_o, z_g)))
                 row_i.append(Vector((x_g, y_i, z_g)))
             q_out.append(row_o)
@@ -2565,10 +2597,11 @@ def build_trunk(body_ob, mats, collection):
             # У заднего ребра X следует плавной дуге кормы rear_tail_surface_x(y)
             x_back_edge = rear_tail_surface_x(y)
             x = x_start * (1.0 - u_x) + x_back_edge * u_x
-            edge_drop = 0.008 * (abs(v) ** 2.6) * (1.0 - 0.4 * t_taper)
-            # Аккуратный аэродинамический «утиный хвостик» у самой задней кромки багажника
-            lip_kick = 0.007 * (max(0.0, (u_x - 0.78) / 0.22) ** 1.6) * (1.0 - 0.3 * abs(v))
-            z_top = trunk_deck_z(x, y) - edge_drop + lip_kick + 0.002
+            edge_drop = 0.008 * (abs(v) ** 2.6) * (1.0 - 0.35 * t_taper)
+            # Мягкий «утиный хвостик» в центре багажника, сходящий в 0 на боковых швах v=±1
+            # (крышка идеально заподлицо с задними крыльями Fender_Rear!)
+            lip_kick = 0.006 * (max(0.0, (u_x - 0.76) / 0.24) ** 1.6) * (1.0 - v * v)
+            z_top = trunk_deck_z(x, y) - edge_drop + lip_kick
             p_out = Vector((x - TRUNK_HINGE_X, y, z_top - hz))
             p_in = Vector((x - TRUNK_HINGE_X, y, z_top - TRUNK_LID_THICKNESS - hz))
             row_out.append(bm_lid.verts.new(p_out))
@@ -2848,9 +2881,9 @@ def build_hood(body_ob, mats, collection):
             t_f = t_f * t_f * (3.0 - 2.0 * t_f)
             x = x_nom * (1.0 - t_f) + (x_start + (x_front_edge - x_start) * u_x) * t_f
             edge_drop = 0.014 * (abs(v) ** 2.8)
-            # Плавный передний клюв капота S90: мягко спускается к верху решётки радиатора
-            nose_drop = 0.036 * (max(0.0, (u_x - 0.72) / 0.28) ** 1.8)
-            z_top = hood_deck_z(min(x, X_MAX - 0.05), y) - edge_drop - nose_drop + 0.002
+            # Плавный передний клюв капота S90: мягко спускается к верху решётки радиатора и фар
+            nose_drop = 0.044 * (max(0.0, (u_x - 0.70) / 0.30) ** 1.75)
+            z_top = hood_deck_z(min(x, X_MAX - 0.05), y) - edge_drop - nose_drop + 0.001
             row_out.append(Vector((x - HOOD_HINGE_X, y, z_top - hz)))
             row_in.append(Vector((x - HOOD_HINGE_X, y, z_top - HOOD_LID_THICKNESS - hz)))
         outer_pts.append(row_out)
@@ -3192,29 +3225,32 @@ def build_volvo_details(body_ob, mats, collection):
     # (Radiator_Support): огибают передний угол крыла до y=0.775, плотно заполняя нишу
     # между передним крылом, капотом и съёмным передним бампером!
     for label, sy in (('L', 1.0), ('R', -1.0)):
-        y_in, y_out = sy * 0.418, sy * 0.780
+        y_in, y_out = sy * 0.415, sy * 0.784
         ya, yb = (y_in, y_out) if y_in < y_out else (y_out, y_in)
-        z_lo, z_hi = 0.556, 0.696
+        z_lo, z_hi = 0.556, 0.714
 
-        # 3a. Глубокий глянцево-чёрный корпус блок-фары (от линзы до кронштейна кузова x=2.24)
+        # 3a. Глубокий глянцево-чёрный корпус блок-фары (клиновидный верх к крылу, без кармана!)
         bm_hl = bmesh.new()
         outer_h = []
         inner_h = []
         ny_h, nz_h = 13, 5
         for j in range(nz_h):
             vz = j / (nz_h - 1)
-            zz = z_lo + (z_hi - z_lo) * vz
             row_o = []
             row_i = []
             for i in range(ny_h):
                 vy = i / (ny_h - 1)
                 yy = ya + (yb - ya) * vy
+                # Клиновидный верх фары: чуть выше на наружном углу крыла (как у Volvo S90)
+                t_out = clamp((abs(yy) - 0.415) / 0.37, 0.0, 1.0)
+                z_top_loc = z_hi - 0.008 + 0.018 * t_out
+                zz = z_lo + (z_top_loc - z_lo) * vz
                 # На наружном краю фары (|yy| > 0.66) плавный wrap-around заворот к крылу
-                t_wrap = clamp((abs(yy) - 0.66) / 0.12, 0.0, 1.0)
+                t_wrap = clamp((abs(yy) - 0.66) / 0.125, 0.0, 1.0)
                 sx = _surf_x(yy, zz, front=True) + 0.008 - 0.045 * (t_wrap ** 1.8)
                 # Задняя стенка блок-фары садится в опорную чашу Radiator_Support
                 row_o.append(Vector((sx, yy, zz)))
-                row_i.append(Vector((min(2.245, sx - 0.045), yy * 0.94, zz)))
+                row_i.append(Vector((min(2.245, sx - 0.048), yy * 0.94, zz)))
             outer_h.append(row_o)
             inner_h.append(row_i)
         _add_thick_grid(bm_hl, outer_h, inner_h)
@@ -3252,13 +3288,15 @@ def build_volvo_details(body_ob, mats, collection):
         ln_out, ln_in = [], []
         for j in range(nz_h):
             vz = j / (nz_h - 1)
-            zz = (z_lo - 0.004) + (z_hi - z_lo + 0.008) * vz
             ro, ri = [], []
             for i in range(ny_h):
                 vy = i / (ny_h - 1)
                 yy = (ya - 0.003) + (yb - ya + 0.006) * vy
-                t_wrap = clamp((abs(yy) - 0.66) / 0.12, 0.0, 1.0)
-                sx = _surf_x(yy, zz, front=True) + 0.020 - 0.045 * (t_wrap ** 1.8)
+                t_out = clamp((abs(yy) - 0.415) / 0.37, 0.0, 1.0)
+                z_top_loc = z_hi - 0.004 + 0.018 * t_out
+                zz = (z_lo - 0.004) + (z_top_loc - (z_lo - 0.004)) * vz
+                t_wrap = clamp((abs(yy) - 0.66) / 0.125, 0.0, 1.0)
+                sx = _surf_x(yy, zz, front=True) + 0.018 - 0.045 * (t_wrap ** 1.8)
                 ro.append(Vector((sx, yy, zz)))
                 ri.append(Vector((sx - 0.005, yy, zz)))
             ln_out.append(ro)
@@ -3386,22 +3424,29 @@ def build_volvo_details(body_ob, mats, collection):
         uv_box(ref_ob, scale=8.0)
         objs.append(ref_ob)
 
-    # 5b. Контрастные накладки порогов (Side_Skirt_L/R, в тон съёмным антрацитовым бамперам)
+    # 5b. Контрастные накладки порогов (Side_Skirt_L/R, в тон съёмным антрацитовым бамперам):
+    # плавное сужение концов у арок — органично вписаны в нижнюю линию кузова без торчащих торцов
     for label, side in (('L', 1.0), ('R', -1.0)):
         bm_sk = bmesh.new()
         sk_out, sk_in = [], []
-        n_sk = 15
+        n_sk = 19
         for i in range(n_sk):
-            x = -1.075 + (1.205 - (-1.075)) * i / float(n_sk - 1)
-            z_lo = ZB(x) + 0.006
-            z_hi = CABIN_SILL_Z - 0.006
+            u_x = i / float(n_sk - 1)
+            x = -1.060 + (1.190 - (-1.060)) * u_x
+            # Плавное сужение концов накладки вровень с нижней кромкой арок
+            end_fade = math.sin(math.pi * clamp(u_x * 6.0, 0.0, 0.5)) * math.sin(
+                math.pi * clamp((1.0 - u_x) * 6.0, 0.0, 0.5)
+            )
+            z_lo = ZB(x) + 0.018 - 0.008 * end_fade
+            z_hi = CABIN_SILL_Z - 0.004
             ro, ri = [], []
             for j in range(4):
                 u = j / 3.0
                 zz = z_lo + (z_hi - z_lo) * u
-                yy = side_surface_y(x, zz) + 0.006 * math.sin(math.pi * u)
+                flare = 0.004 * math.sin(math.pi * u) * end_fade
+                yy = side_surface_y(x, zz) + flare
                 ro.append(Vector((x, side * yy, zz)))
-                ri.append(Vector((x, side * (yy - 0.032), zz)))
+                ri.append(Vector((x, side * (yy - 0.026), zz)))
             sk_out.append(ro)
             sk_in.append(ri)
         _add_thick_grid(bm_sk, sk_out, sk_in)
