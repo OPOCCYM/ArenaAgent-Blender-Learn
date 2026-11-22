@@ -13,6 +13,9 @@ assert scene.render.engine in {'BLENDER_EEVEE','BLENDER_EEVEE_NEXT'}
 body=bpy.data.objects.get('Body_Shell')
 assert body and body.type=='MESH'
 assert abs(body.dimensions.x-4.264)<.02, body.dimensions[:]
+for name in ('Hood_Panel','Trunk_Lid','Door_L','Door_R','Front_Fender_L','Front_Fender_R','Rear_Quarter_L','Rear_Quarter_R'):
+    panel=bpy.data.objects.get(name)
+    assert panel and panel.type=='MESH' and len(panel.data.polygons)>20, f'missing separated body panel: {name}'
 assert body.dimensions.z>.8, body.dimensions[:]
 assert bpy.data.objects.get('Body_Shell') and any(o.name.startswith('Front_Door_Glass_') for o in scene.objects), 'window aperture/glazing assembly missing'
 assert all(any(o.name.startswith(prefix) for o in scene.objects) for prefix in ('A_Pillar_','B_Pillar_','C_Pillar_')), 'painted glazing pillars missing'

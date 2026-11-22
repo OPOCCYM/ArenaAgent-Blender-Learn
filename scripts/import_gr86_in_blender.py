@@ -139,7 +139,7 @@ def build_parametric_shell():
         ring=half+[(-y,z) for y,z in reversed(half[1:-1])]
         rings.append(ring)
         verts.extend((x,y,z) for y,z in ring)
-    faces=[]; face_mats=[]
+    faces=[]; face_mats=[]; face_parts=[]
     trim_centres=(-.55,.15,.55)
     for i in range(len(sections)-1):
         xm=.5*(sections[i]+sections[i+1])
@@ -153,24 +153,48 @@ def build_parametric_shell():
             # Leave actual apertures in the opaque shell for the separate glazing meshes.
             if in_glass_band and in_window_span:
                 continue
-            faces.append((i*n_ring+j,i*n_ring+j2,(i+1)*n_ring+j2,(i+1)*n_ring+j))
+            face=(i*n_ring+j,i*n_ring+j2,(i+1)*n_ring+j2,(i+1)*n_ring+j)
+            faces.append(face)
             mi=2 if in_glass_band and any(abs(xm-c)<.024 for c in trim_centres) else 0
             face_mats.append(mi)
-    faces.append(tuple(reversed(range(n_ring)))); face_mats.append(0)
+            part='Body_Shell'
+            # Split side skin into independently selectable panel objects. Keep seams on
+            # existing loft section boundaries and the door-gap locations.
+            side=1 if j<n_half else -1
+            if lo>=3 and hi<=10:
+                if -1.90<xm<-.75: part=f'Front_Fender_{"L" if side>0 else "R"}'
+                elif -.75<xm<.75: part=f'Door_{"L" if side>0 else "R"}'
+                elif .75<xm<1.90: part=f'Rear_Quarter_{"L" if side>0 else "R"}'
+            # Upper longitudinal skin is divided into bonnet and deck-lid panels.
+            if lo>=10 and hi<=15:
+                if xm<-.97: part='Hood_Panel'
+                elif xm>1.00: part='Trunk_Lid'
+            face_parts.append(part)
+    faces.append(tuple(reversed(range(n_ring)))); face_mats.append(0); face_parts.append('Body_Shell')
     last=(len(sections)-1)*n_ring
-    faces.append(tuple(last+j for j in range(n_ring))); face_mats.append(0)
-    mesh=bpy.data.meshes.new('GR86_ParametricShellMesh')
-    mesh.from_pydata(verts,[],faces); mesh.validate(verbose=False); mesh.update()
-    shell=bpy.data.objects.new('Body_Shell',mesh)
-    bpy.data.collections['GR86_Model'].objects.link(shell)
+    faces.append(tuple(last+j for j in range(n_ring))); face_mats.append(0); face_parts.append('Body_Shell')
     mats=[bpy.data.materials.get('Pearl_White'),bpy.data.materials.get('Glass_Dark'),
           bpy.data.materials.get('Window_Trim') or material('Window_Trim',(.012,.016,.022),.1,.24)]
-    for mat in mats: mesh.materials.append(mat)
-    for poly,mi in zip(mesh.polygons,face_mats):
-        # Keep the primary shell continuous and white here; separately surfaced glazing
-        # below gives the windscreen a real curved shape and avoids dark end-cap faces.
-        poly.material_index=0 if mi==1 else mi; poly.use_smooth=True
-    shell['construction']='Dense longitudinal loft; separate fitted curved glazing surfaces'
+    components={}
+    for idx,part in enumerate(face_parts): components.setdefault(part,[]).append(idx)
+    shell=None
+    for part,face_ids in components.items():
+        part_faces=[faces[k] for k in face_ids]
+        used=sorted({v for face in part_faces for v in face})
+        remap={old:new for new,old in enumerate(used)}
+        mesh=bpy.data.meshes.new(f'{part}_Mesh')
+        mesh.from_pydata([verts[k] for k in used],[],[tuple(remap[v] for v in f) for f in part_faces])
+        mesh.validate(verbose=False); mesh.update()
+        for mat in mats: mesh.materials.append(mat)
+        for poly,source_id in zip(mesh.polygons,face_ids):
+            # Keep the primary shell white; glazing is independent pane geometry.
+            poly.material_index=0 if face_mats[source_id]==1 else face_mats[source_id]
+            poly.use_smooth=True
+        ob=bpy.data.objects.new(part,mesh); bpy.data.collections['GR86_Model'].objects.link(ob)
+        ob['component_type']='separate exterior panel' if part!='Body_Shell' else 'main body shell'
+        ob['construction']='Split from dense longitudinal loft; shared section seams, independent mesh object'
+        if part=='Body_Shell': shell=ob
+    shell['reference_status']='Proportional draft; verify against GR86 orthographic references'
     # Side glazing: subdivided curved patches fitted to the loft's shoulder and roof
     # coordinates, split into front door glass and rear quarter glass by a B-pillar.
     glass_mat=bpy.data.materials.get('Glass_Dark')
