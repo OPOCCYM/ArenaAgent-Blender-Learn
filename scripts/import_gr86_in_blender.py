@@ -116,9 +116,20 @@ def build_parametric_shell():
         roofw=min(smooth_curve(CURVES['roof_width'],x),.94*w)
         shoulder=smooth_curve(CURVES['shoulder'],x); dz=max(.015,top-belt)
         # Lower side, shoulder and belt-line points, from underside centre outward.
-        body=[(0,zb),(.36*w,zb),(.63*w,zb+.006),(.80*w,zb+.035),
-              (.90*w,zb+.11),(.973*w,zb+.27),(.96*w,shoulder-.07),(.993*w,shoulder),
-              (w,shoulder+.055),(.987*w,belt-.06),(.95*w,belt)]
+        body=[(0,zb),(.36*w,zb),(.66*w,zb+.010),(.81*w,zb+.045),
+              (.90*w,zb+.125),(.955*w,shoulder-.11),(.975*w,shoulder-.045),(.993*w,shoulder),
+              (w,shoulder+.050),(.987*w,belt-.055),(.95*w,belt)]
+        # Subtle convex door crowns and wheel-arch shoulder swell, built into the skin.
+        for k in range(3,len(body)):
+            y,z=body[k]; fraction=max(0,min(1,(z-zb)/max(.03,belt-zb)))
+            bulge=0.0
+            if -.75<x<.75:
+                u=(x+.75)/1.5
+                bulge+=.010*math.sin(math.pi*u)*math.sin(math.pi*fraction)
+            for wheel_x in (-1.2875,1.2875):
+                bulge+=.012*math.exp(-((x-wheel_x)/.43)**2)*math.sin(math.pi*min(1,max(0,(k-2)/9)))
+            if 5<=k<=8: bulge+=.003
+            body[k]=(y+bulge,z)
         opening=wheel_opening(x)
         if opening is not None:
             for k in (3,4,5):
@@ -224,10 +235,18 @@ def build_parametric_shell():
         return po
     # Side windows sit just outside the body skin; sampled densely for smooth highlights.
     for side in (-1,1):
-        for name,x0,x1 in [('Front_Door_Glass',-.88,.12),('Rear_Quarter_Glass',.20,.91)]:
+        window_specs=[
+            # Windshield/A-pillar sweep forward, with a near-vertical rear door edge.
+            ('Front_Door_Glass',-.88,.14,-.56,.12),
+            # Fastback quarter glass tapers into the short C-pillar.
+            ('Rear_Quarter_Glass',.20,.91,.18,.56),
+        ]
+        for name,x_lower_a,x_lower_b,x_upper_a,x_upper_b in window_specs:
             grid=[]
             for r in range(9):
                 v=r/8; row=[]
+                x0=x_lower_a+(x_upper_a-x_lower_a)*v
+                x1=x_lower_b+(x_upper_b-x_lower_b)*v
                 for c in range(25):
                     u=c/24; x=x0+(x1-x0)*u
                     belt=smooth_curve(CURVES['belt'],x); top=smooth_curve(CURVES['top'],x)

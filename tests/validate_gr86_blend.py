@@ -55,6 +55,10 @@ for name in ('Windscreen_Glass','Backlight_Glass','Front_Door_Glass_+1','Rear_Qu
     pane=bpy.data.objects.get(name)
     assert pane and pane.type=='MESH' and len(pane.data.polygons)>=100, f'missing fitted curved glazing: {name}'
     assert any(slot==bpy.data.materials.get('Glass_Dark') for slot in pane.data.materials), f'glass material missing: {name}'
+front_window=bpy.data.objects['Front_Door_Glass_+1'].data.vertices
+rear_window=bpy.data.objects['Rear_Quarter_Glass_+1'].data.vertices
+assert front_window[8*25].co.x-front_window[0].co.x>.25, 'A-pillar edge should sweep rearward toward roof'
+assert rear_window[8*25+24].co.x-rear_window[24].co.x<-.25, 'quarter glass should taper into fastback C-pillar'
 # Structural mesh sanity: catch NaNs and zero-area polygons before export.
 mesh_objects=[o for o in scene.objects if o.type=='MESH']
 nonfinite=[]; degenerate=[]
