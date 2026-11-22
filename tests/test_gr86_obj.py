@@ -24,7 +24,7 @@ class ObjBlockoutTests(unittest.TestCase):
 
     def test_vehicle_object_groups_exist(self):
         text = "\n".join(self.lines)
-        for token in ("Body_Blockout", "Cabin_Glazing_Blockout", "Tire_Front_-1", "Tire_Rear_1", "Fender_Arch", "Headlamp", "Front_Badge", "Grille_Slat", "Rear_Plate", "Rear_Diffuser", "TailLamp", "Exhaust_Tip"):
+        for token in ("Body_Blockout", "Cabin_Glazing_Blockout", "Tire_Front_-1", "Tire_Rear_1", "Fender_Arch", "Headlamp", "Front_Badge", "Front_Grille_Honeycomb", "Rear_Plate", "Rear_Diffuser", "TailLamp", "Exhaust_Tip"):
             self.assertIn(token, text)
         tires = [line for line in self.lines if line.startswith("o Tire_")]
         self.assertEqual(len(tires), 4)

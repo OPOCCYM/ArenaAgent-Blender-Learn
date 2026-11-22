@@ -131,6 +131,7 @@ def generate(path):
     o.material('Tire_Rubber',(.018,.02,.023),0,.84); o.material('Graphite_Alloy',(.68,.70,.73),.82,.24)
     o.material('Brake_Metal',(.24,.24,.23),.65,.38); o.material('Lamp_White',(.94,.97,1.0),.1,.15)
     o.material('Lamp_Red',(.6,.015,.012),.1,.2)
+    o.material('Grille_Mesh',(.075,.09,.105),.72,.36)
     sections=[(-2.132,.62,-.11),(-1.88,.76,-.04),(-1.42,.85,.015),(-.90,.88,.035),(-.38,.82,0),(.30,.82,0),(.88,.87,-.015),(1.45,.86,.005),(1.90,.77,-.015),(2.132,.62,-.075)]
     profile=[(-.96,.43),(-.995,.50),(-1.0,.67),(-.975,.77),(-.93,.87),(-.84,.915),(-.63,.94),(0,.95),(.63,.94),(.84,.915),(.93,.87),(.975,.77),(1.0,.67),(.995,.50),(.96,.43),(.55,.43),(0,.43),(-.55,.43)]
     o.use('Pearl_White'); o.loft('Body_Blockout',sections,profile)
@@ -174,9 +175,20 @@ def generate(path):
     gv=[(-2.153,y,z) for y,z in grille]+[(-2.126,y,z) for y,z in grille]
     gf=[tuple(range(6)),tuple(reversed(range(6,12)))]+[(i,(i+1)%6,(i+1)%6+6,i+6) for i in range(6)]
     o.mesh('Front_Grille',gv,gf)
-    o.use('Graphite_Alloy')
-    for idx,z in enumerate((.585,.625,.665,.705)):
-        o.box(f'Grille_Slat_{idx}',(-2.160,0,z),(.010,.62,.009))
+    # OEM-style open honeycomb mesh replaces the blockout's horizontal grille bars.
+    o.use('Grille_Mesh'); hv=[]; hf=[]
+    for row in range(5):
+        zc=.574+row*.036
+        for col in range(15):
+            yc=-.318+col*.045+(row%2)*.0225
+            if abs(yc)>.345: continue
+            base=len(hv); radius=.022; inner=.017
+            for r in (radius,inner):
+                for k in range(6):
+                    a=math.pi/6+k*math.pi/3
+                    hv.append((-2.164,yc+r*math.cos(a),zc+r*math.sin(a)))
+            for k in range(6): hf.append((base+k,base+(k+1)%6,base+6+(k+1)%6,base+6+k))
+    o.mesh('Front_Grille_Honeycomb',hv,hf)
     o.use('Brake_Metal'); o.ellipsoid('Front_Badge',(-2.167,0,.675),(.012,.036,.026),24,12)
     # Slim angular headlamp housings and cool-white lens panels, rather than ellipsoids.
     for side in (-1,1):

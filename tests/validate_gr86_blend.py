@@ -19,7 +19,9 @@ assert front_bumper.dimensions.x>.20 and front_bumper.dimensions.y>1.3, front_bu
 assert rear_bumper.dimensions.x>.20 and rear_bumper.dimensions.y>1.3, rear_bumper.dimensions[:]
 for name,bumper in (('Front_Bumper_Gap',front_bumper),('Rear_Bumper_Gap',rear_bumper)):
     assert bpy.data.objects.get(name) and bpy.data.objects[name].parent==bumper, f'{name} seam must follow bumper'
-for name in ('Front_Grille','Front_Splitter','Headlamp_Bezel_1','Headlamp_DRL_1'):
+grid=bpy.data.objects.get('Front_Grille_Honeycomb')
+assert grid and len(grid.data.polygons)>=250, 'open OEM grille honeycomb geometry missing'
+for name in ('Front_Grille','Front_Grille_Honeycomb','Front_Splitter','Headlamp_Bezel_1','Headlamp_DRL_1'):
     assert bpy.data.objects[name].parent==front_bumper, f'{name} should move with front bumper'
 for name in ('Rear_Diffuser','Rear_Plate','TailLamp_1','Exhaust_Tip_1'):
     assert bpy.data.objects[name].parent==rear_bumper, f'{name} should move with rear bumper'
