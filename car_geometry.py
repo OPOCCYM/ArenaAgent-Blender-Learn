@@ -113,6 +113,24 @@ FRONT_ARCH_CUT_R = WHEEL_R + 0.036  # радиус реального вырез
 FENDER_THICKNESS = 0.016      # толщина штампованной панели переднего крыла, м
 BUMPER_THICKNESS = 0.020      # толщина оболочки переднего бампера, м
 
+# --------------------------------------------------------------------------- #
+# 1е. Разделение кормы: задние крылья, задний бампер, фонари на кузове и багажник
+# --------------------------------------------------------------------------- #
+REAR_CLIP_X = -1.08           # задняя перегородка монокока Body (сразу за задней дверью)
+REAR_FENDER_X_FRONT = -1.062  # передняя кромка заднего крыла (зазор ~6 мм к задней двери)
+REAR_FENDER_X_REAR = -2.355   # задний угол заднего крыла у фонаря/бампера
+REAR_BUMPER_X = -2.345        # линия перехода бокового крылышка в заднюю панель бампера
+REAR_BUMPER_WING_X = -1.855   # задний край задней арки, до которого доходит крылышко бампера
+REAR_BUMPER_TOP_Z = 0.655     # верхняя горизонтальная кромка заднего бампера (под фонарями)
+REAR_ARCH_CUT_R = WHEEL_R + 0.036  # радиус реального выреза колёсной арки в заднем крыле
+
+# Задняя вертикальная панель крышки багажника строго между фонарями и над бампером
+TRUNK_TAIL_HALF_Y = 0.452     # полуширина нижней вертикальной части крышки багажника
+TAIL_LIGHT_Y_IN = 0.470       # внутренняя кромка заднего фонаря (зазор 18 мм от крышки багажника)
+TAIL_LIGHT_Y_OUT = 0.752      # наружная кромка заднего фонаря на углу кузова
+TAIL_LIGHT_Z_LO = 0.668       # нижняя кромка заднего фонаря (зазор 13 мм над задним бампером)
+TAIL_LIGHT_Z_HI = 0.880       # верхняя кромка заднего фонаря (ниже гребня заднего крыла)
+
 
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
@@ -363,6 +381,44 @@ def fender_bottom_z(x):
     if x >= FRONT_BUMPER_WING_X:
         z_lo = max(z_lo, fender_bumper_seam_z(x))
     return min(z_lo, BELT(x) - 0.05)
+
+
+def rear_fender_bumper_seam_z(x):
+    """Высота наклонного стыка заднего крыла с задним бампером на участке
+    [REAR_FENDER_X_REAR .. REAR_BUMPER_WING_X]: от заднего края арки вверх к низу фонаря."""
+    u = clamp(
+        (REAR_BUMPER_WING_X - x) / max(REAR_BUMPER_WING_X - REAR_FENDER_X_REAR, 0.05),
+        0.0, 1.0,
+    )
+    return 0.50 + (REAR_BUMPER_TOP_Z + 0.005 - 0.50) * (u ** 0.85)
+
+
+def rear_fender_bottom_z(x):
+    """Нижняя кромка отдельного заднего крыла с учётом реального выреза задней арки
+    вокруг (AXLE_R, WHEEL_Z) и стыка с задним бампером."""
+    z_sill = ZB(x) + 0.052
+    dx = abs(x - AXLE_R)
+    if dx < REAR_ARCH_CUT_R - 1e-4:
+        z_arch = WHEEL_Z + math.sqrt(max(0.0, REAR_ARCH_CUT_R * REAR_ARCH_CUT_R - dx * dx))
+        # Плавное скругление нижнего входа арки в линию порога (убирает отвесный скачок у x=-1.07)
+        t_fade = clamp((dx - (REAR_ARCH_CUT_R - 0.055)) / 0.055, 0.0, 1.0)
+        t_fade = t_fade * t_fade * (3.0 - 2.0 * t_fade)
+        z_lo = z_arch * (1.0 - t_fade) + max(z_sill, WHEEL_Z - 0.06) * t_fade
+        z_lo = max(z_sill, z_lo)
+    else:
+        t_out = clamp((dx - REAR_ARCH_CUT_R) / 0.045, 0.0, 1.0)
+        t_out = t_out * t_out * (3.0 - 2.0 * t_out)
+        z_lo = max(z_sill, (WHEEL_Z - 0.06) * (1.0 - t_out) + z_sill * t_out)
+    if x <= REAR_BUMPER_WING_X:
+        z_lo = max(z_lo, rear_fender_bumper_seam_z(x))
+    return min(z_lo, BELT(x) - 0.05)
+
+
+def rear_tail_surface_x(y):
+    """Единая плавная дуга заднего торца X(y) для крышки багажника, задних фонарей
+    и верхней кромки заднего бампера (уходит от X_MIN=-2.50 по центру к -2.355 на углах)."""
+    u = clamp(abs(y) / 0.78, 0.0, 1.0)
+    return X_MIN + 0.020 + 0.125 * (u ** 2.15)
 
 
 def trunk_bay_mask(x, transition=0.04):

@@ -28,12 +28,22 @@ from car_geometry import (
     HOOD_X_REAR,
     LENGTH,
     N_SECTIONS,
+    REAR_BUMPER_TOP_Z,
+    REAR_BUMPER_WING_X,
+    REAR_CLIP_X,
+    REAR_FENDER_X_FRONT,
+    REAR_FENDER_X_REAR,
+    TAIL_LIGHT_Y_IN,
+    TAIL_LIGHT_Y_OUT,
+    TAIL_LIGHT_Z_HI,
+    TAIL_LIGHT_Z_LO,
     TIP_F,
     TIP_R,
     TRUNK_BAY_Z,
     TRUNK_LIFT_CYL_LEN,
     TRUNK_LIFT_ROD_LEN,
     TRUNK_OPEN_DEG,
+    TRUNK_TAIL_HALF_Y,
     TRUNK_X_FRONT,
     TRUNK_X_REAR,
     V_BODY,
@@ -60,6 +70,9 @@ from car_geometry import (
     glass_section,
     hood_bay_mask,
     hood_lift_endpoints,
+    rear_fender_bottom_z,
+    rear_fender_bumper_seam_z,
+    rear_tail_surface_x,
     sanitize_name,
     trunk_bay_mask,
     trunk_lift_endpoints,
@@ -225,6 +238,25 @@ def test_front_fender_and_bumper_separation_geometry():
     assert fender_bottom_z(FENDER_X_REAR) < 0.25
     # Линия стыка крыло-бампер плавно поднимается вперёд к фаре
     assert fender_bumper_seam_z(FENDER_X_FRONT) > fender_bumper_seam_z(FRONT_BUMPER_WING_X) + 0.15
+
+
+def test_rear_separation_fenders_bumper_taillights_and_trunk():
+    """Задние крылья, задний бампер, фонари на кузове и крышка багажника строго разделены."""
+    assert X_MIN < REAR_FENDER_X_REAR < REAR_BUMPER_WING_X < AXLE_R < REAR_CLIP_X < 0.0
+    assert REAR_FENDER_X_FRONT > REAR_CLIP_X
+    # Над осью заднего колеса вырез арки выше верхней кромки шины
+    assert rear_fender_bottom_z(AXLE_R) > WHEEL_Z + 0.35
+    # Шов крыло-бампер поднимается к нижней кромке заднего фонаря
+    assert rear_fender_bumper_seam_z(REAR_FENDER_X_REAR) > REAR_BUMPER_TOP_Z
+    assert rear_fender_bumper_seam_z(REAR_FENDER_X_REAR) > (
+        rear_fender_bumper_seam_z(REAR_BUMPER_WING_X) + 0.14
+    )
+    # Строгое разделение зон: крышка багажника между фонарями, бампер строго ниже фонарей
+    assert TRUNK_TAIL_HALF_Y + 0.015 < TAIL_LIGHT_Y_IN < TAIL_LIGHT_Y_OUT
+    assert REAR_BUMPER_TOP_Z + 0.010 < TAIL_LIGHT_Z_LO < TAIL_LIGHT_Z_HI
+    # Дуга заднего торца плавно уходит вперёд к углам кормы
+    assert rear_tail_surface_x(0.0) < rear_tail_surface_x(0.45) < rear_tail_surface_x(0.75)
+
 
 
 

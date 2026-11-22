@@ -69,6 +69,8 @@ def test_collections_and_bounding_box(built_scene_dir):
         'Fender_Front_L', 'Fender_Front_R', 'Front_Bumper',
         'Front_Subframe', 'Crash_Beam', 'Fender_Apron_L', 'Fender_Apron_R',
         'Radiator_Support', 'Cowl_Panel',
+        'Rear_Subframe', 'Rear_Crash_Beam', 'Trunk_Tub',
+        'Fender_Rear_L', 'Fender_Rear_R', 'Rear_Bumper',
         'Hood_Hinge_Mount_L', 'Hood_Hinge_Mount_R',
         'Hood_Hinge_Arm_L', 'Hood_Hinge_Arm_R',
         'Hood_Lift_Mount_L', 'Hood_Lift_Mount_R',
@@ -92,12 +94,31 @@ def test_collections_and_bounding_box(built_scene_dir):
         assert required in car_names, f'Отсутствует обязательный объект {required}'
 
     # В зоне дверных проёмов Body действительно имеет сквозной вырез до уровня порога,
-    # а передняя часть (крылья и бампер) реально отделена от монокока Body по моторному щиту
+    # а передняя и задняя части (крылья и бамперы) реально отделены от монокока Body
     body = bpy.data.objects['Body']
     assert max(v.co.x for v in body.data.vertices) < 1.00
+    assert min(v.co.x for v in body.data.vertices) > -1.12
     for x_probe in (-0.50, 0.35):
         zs_near = [v.co.z for v in body.data.vertices if abs(v.co.x - x_probe) < 0.04]
         assert zs_near and max(zs_near) < 0.32, f'Нет сквозного выреза в Body на x={x_probe}'
+
+    # Фары и задние фонари закреплены на силовом каркасе кузова (НЕ на бамперах и НЕ на багажнике)
+    for hl_name in ('Headlight_L', 'Headlight_R', 'Headlight_DRL_L', 'Headlight_DRL_R',
+                    'Headlight_Lens_L', 'Headlight_Lens_R'):
+        assert bpy.data.objects[hl_name].parent.name == 'Radiator_Support'
+    for tl_name in ('Tail_Housing_L', 'Tail_Housing_R', 'Tail_Light_L', 'Tail_Light_R',
+                    'Tail_Lens_L', 'Tail_Lens_R'):
+        assert bpy.data.objects[tl_name].parent.name == 'Rear_Subframe'
+    # Корпуса задних фонарей компактны и не заходят глубоко внутрь багажника
+    for th_name in ('Tail_Housing_L', 'Tail_Housing_R'):
+        th_ob = bpy.data.objects[th_name]
+        th_xs = [(th_ob.matrix_world @ v.co).x for v in th_ob.data.vertices]
+        assert (max(th_xs) - min(th_xs)) < 0.14, f'{th_name} слишком глубоко заходит в багажник'
+    # Детали заднего бампера и задних крыльев привязаны к соответствующим съёмным панелям
+    for rb_child in ('Rear_Diffuser', 'Exhaust_L', 'Exhaust_R'):
+        assert bpy.data.objects[rb_child].parent.name == 'Rear_Bumper'
+    assert bpy.data.objects['Wheel_Arch_RL'].parent.name == 'Fender_Rear_L'
+    assert bpy.data.objects['Wheel_Arch_RR'].parent.name == 'Fender_Rear_R'
 
     # Стойки A/B/C реально соединяют нижнюю ванну кузова с отдельной крышей Roof
     roof = bpy.data.objects['Roof']
