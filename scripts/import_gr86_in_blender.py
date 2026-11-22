@@ -202,6 +202,26 @@ def build_parametric_shell():
                     row.append((x,y,z))
                 grid.append(row)
             pane(f'{name}_{side:+d}',grid)
+        # Painted A/B/C pillars follow the fitted glazing edge paths. Narrow quad strips
+        # sit proud of the glass and restore real body-colored breaks between panes.
+        def pillar(name, lower_x, upper_x, z0=.945, z1=1.245, width=.026):
+            verts=[]
+            for v in (0,1):
+                x=lower_x+(upper_x-lower_x)*v
+                z=z0+(z1-z0)*v
+                w=smooth_curve(CURVES['width'],x)
+                frac=.77-.17*v
+                y=side*(w*frac+.006)
+                half=width*(1-.18*v)
+                verts.extend([(x-half,y,z),(x+half,y,z)])
+            me=bpy.data.meshes.new(name+'_Mesh'); me.from_pydata(verts,[],[(0,1,3,2)])
+            me.materials.append(bpy.data.materials['Pearl_White']); me.update()
+            ob=bpy.data.objects.new(name,me); bpy.data.collections['GR86_Model'].objects.link(ob)
+            sol=ob.modifiers.new('Pillar rolled edge','SOLIDIFY'); sol.thickness=.008
+            bev=ob.modifiers.new('Pillar edge highlight','BEVEL'); bev.width=.004; bev.segments=2
+        pillar(f'A_Pillar_{side:+d}',-.88,-.56,width=.020)
+        pillar(f'B_Pillar_{side:+d}',.12,.12,width=.018)
+        pillar(f'C_Pillar_{side:+d}',.91,.55,width=.024)
     # Curved front and rear windscreens: 2-D grids bowed gently across width and height.
     for name,xlo,xhi,zlo,zhi in [('Windscreen',-.93,-.56,.965,1.255),('Backlight',1.04,.55,.965,1.245)]:
         grid=[]

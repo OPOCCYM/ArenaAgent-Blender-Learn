@@ -15,6 +15,7 @@ assert body and body.type=='MESH'
 assert abs(body.dimensions.x-4.264)<.02, body.dimensions[:]
 assert body.dimensions.z>.8, body.dimensions[:]
 assert bpy.data.objects.get('Body_Shell') and any(o.name.startswith('Front_Door_Glass_') for o in scene.objects), 'window aperture/glazing assembly missing'
+assert all(any(o.name.startswith(prefix) for o in scene.objects) for prefix in ('A_Pillar_','B_Pillar_','C_Pillar_')), 'painted glazing pillars missing'
 for name in ('Windscreen_Glass','Backlight_Glass','Front_Door_Glass_+1','Rear_Quarter_Glass_+1'):
     pane=bpy.data.objects.get(name)
     assert pane and pane.type=='MESH' and len(pane.data.polygons)>=100, f'missing fitted curved glazing: {name}'
