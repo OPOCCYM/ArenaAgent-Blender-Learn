@@ -1081,7 +1081,7 @@ def build_front_structure_and_panels(body_ob, mats, collection):
                 (x - (HOOD_X_REAR + 0.006)) / max(FENDER_X_FRONT - HOOD_X_REAR, 0.1),
                 0.0, 1.0,
             )
-            f_nose_drop = 0.044 * (max(0.0, (u_hx - 0.70) / 0.30) ** 1.75)
+            f_nose_drop = 0.052 * (max(0.0, (u_hx - 0.68) / 0.32) ** 1.70)
             z_hood_edge = hood_deck_z(x, y_hood_edge) - 0.014 - f_nose_drop
             y_flange = WR(x) + 0.004     # загнутая внутрь монтажная полка под капотом
             z_flange = z_hood_edge - 0.034
@@ -1094,8 +1094,8 @@ def build_front_structure_and_panels(body_ob, mats, collection):
             # Плавное скругление и опускание переднего угла крыла (x > 2.08) точно к верху фары
             t_fcorn = clamp((x - 2.08) / max(FENDER_X_FRONT - 2.08, 0.05), 0.0, 1.0)
             t_fcorn_s = t_fcorn * t_fcorn * (3.0 - 2.0 * t_fcorn)
-            y_ftuck = 1.0 - 0.034 * (t_fcorn ** 2.0)
-            z_fdrop = 0.052 * t_fcorn_s
+            y_ftuck = 1.0 - 0.024 * (t_fcorn ** 2.0)
+            z_fdrop = 0.064 * t_fcorn_s
             profile = []
             for j in range(7):
                 u = j / 6.0
@@ -1228,12 +1228,22 @@ def build_front_structure_and_panels(body_ob, mats, collection):
     for xx, yy, z_lo, z_hi, n_dir, front_w in u_front:
         row_o = []
         row_i = []
+        side_s = 1.0 if yy >= 0.0 else -1.0
         for j in range(nz_fb):
             u = j / float(nz_fb - 1)
             zz = z_lo + (z_hi - z_lo) * u
+            # На боковых крылышках (front_w < 1) вычисляем точную side_surface_y(xx, zz)
+            # на каждой высоте zz -> перепад крыло <-> бампер на шве < 0.5 мм (без ступеньки!)
+            if front_w < 0.99:
+                y_true = side_s * side_surface_y(xx, zz)
+                t_fc = clamp((xx - 2.12) / max(FENDER_X_FRONT - 2.12, 0.05), 0.0, 1.0)
+                y_true *= (1.0 - 0.034 * (t_fc ** 2.0))
+                y_loc = y_true * (1.0 - front_w) + yy * front_w
+            else:
+                y_loc = yy
             # Автомобильная вертикальная пластика бампера:
-            # спортивная нижняя губа (+14 мм) -> ниша воздухозаборников (-8 мм) ->
-            # упругий защитный пояс (+15 мм) -> плавный верхний скос назад (-20 мм)
+            # спортивная нижняя губа (+14 мм) -> ниша воздухозаборников (-10 мм) ->
+            # упругий защитный пояс (+15 мм) -> плавный верхний скос назад (-24 мм)
             lip = 0.014 * ((1.0 - u) ** 3.2)
             intake_cove = (
                 -0.010 * math.sin(math.pi * clamp((u - 0.12) / 0.34, 0.0, 1.0))
@@ -1244,9 +1254,10 @@ def build_front_structure_and_panels(body_ob, mats, collection):
                 if 0.42 < u < 0.88 else 0.0
             )
             top_slope = -0.024 * (max(0.0, (u - 0.72) / 0.28) ** 1.7)
-            side_tuck = -0.022 * ((1.0 - u) ** 2.2) * (1.0 - front_w)
+            # Боковой подгиб только внизу (u -> 0), на верхнем шве u=1 строго 0 мм!
+            side_tuck = -0.012 * ((1.0 - u) ** 2.4) * (1.0 - front_w)
             sculpt = (lip + intake_cove + belt_bulge + top_slope) * front_w + side_tuck
-            p_o = Vector((xx, yy, zz)) + n_dir * sculpt
+            p_o = Vector((xx, y_loc, zz)) + n_dir * sculpt
             p_i = p_o - n_dir * BUMPER_THICKNESS
             row_o.append(p_o)
             row_i.append(p_i)
@@ -1429,8 +1440,9 @@ def build_rear_structure_and_panels(body_ob, mats, collection):
 
             profile = []
             # Мягкий заворот и лёгкий спад заднего угла крыла (x < -2.18) без «квадратного» ребра
+            # y_tuck=0.020: борт на x=-2.355 шире Tail_Lens (0.768 > 0.755) -> 0 пробоев фонаря!
             t_rcorn = clamp((-2.18 - x) / (-2.18 - REAR_FENDER_X_REAR), 0.0, 1.0)
-            y_tuck = 1.0 - 0.040 * (t_rcorn ** 2.0)
+            y_tuck = 1.0 - 0.020 * (t_rcorn ** 2.0)
             z_rdrop = 0.014 * (t_rcorn ** 1.8)
             belt_loc = belt_x - z_rdrop
             for j in range(7):
@@ -1468,23 +1480,32 @@ def build_rear_structure_and_panels(body_ob, mats, collection):
             inner_pts.append(row_in)
         _add_thick_grid(bm_rf, outer_pts, inner_pts)
 
-        # Задний верхний угловой заворот крыла над фонарём (плавно и заподлицо без ступеньки)
+        # Задний верхний угловой заворот крыла над фонарём: верхняя кромка точно повторяет
+        # профиль гребня Fender_Rear от багажника до плеча -> 0 щели и 0 двойной ступеньки!
         c_out = []
         c_in = []
         ny_c, nz_c = 7, 5
-        y_c0 = TAIL_LIGHT_Y_IN - 0.002
-        y_c1 = side_surface_y(REAR_FENDER_X_REAR, BELT(REAR_FENDER_X_REAR)) * 0.960 - 0.010
+        belt_r_end = BELT(REAR_FENDER_X_REAR) - 0.014
+        y_c0 = TRUNK_TAIL_HALF_Y + 0.008
+        y_c1 = side_surface_y(REAR_FENDER_X_REAR, belt_r_end) * 0.980
         z_c0 = TAIL_LIGHT_Z_HI + 0.005
-        z_c1 = BELT(REAR_FENDER_X_REAR) - 0.015
+        z_top_in = trunk_deck_z(REAR_FENDER_X_REAR, y_c0) - 0.008
         for j in range(nz_c):
             vz = j / (nz_c - 1)
-            zz = z_c0 + (z_c1 - z_c0) * vz
             row_co = []
             row_ci = []
             for i in range(ny_c):
                 vy = i / (ny_c - 1)
                 yy = y_c0 + (y_c1 - y_c0) * vy
-                xx = rear_tail_surface_x(yy) + 0.016 * (vz ** 1.3)
+                # Высота верхнего гребня крыла на данном yy (u=1-vy: 0 у борта, 1 у багажника)
+                u_sh = 1.0 - vy
+                z_crest = (
+                    belt_r_end
+                    + (z_top_in - belt_r_end) * (u_sh ** 0.62)
+                    + 0.010 * math.sin(math.pi * u_sh)
+                )
+                zz = z_c0 + (z_crest - z_c0) * vz
+                xx = rear_tail_surface_x(yy) + 0.003 + 0.012 * (vz ** 1.5)
                 row_co.append(Vector((xx, side * yy, zz)))
                 row_ci.append(Vector((xx + FENDER_THICKNESS, side * yy, zz)))
             c_out.append(row_co)
@@ -1570,16 +1591,28 @@ def build_rear_structure_and_panels(body_ob, mats, collection):
     for xx, yy, z_lo, z_hi, n_dir, rear_w in u_stations:
         row_o = []
         row_i = []
+        side_s = 1.0 if yy >= 0.0 else -1.0
         for j in range(nz_rb):
             u = j / float(nz_rb - 1)
             zz = z_lo + (z_hi - z_lo) * u
+            # На боковых крылышках (rear_w < 1) вычисляем точную side_surface_y(xx, zz)
+            # на каждой высоте zz -> стык заднее крыло <-> задний бампер заподлицо (< 1 мм!)
+            if rear_w < 0.99:
+                y_true = side_s * side_surface_y(xx, zz)
+                t_rc = clamp((-2.18 - xx) / (-2.18 - REAR_FENDER_X_REAR), 0.0, 1.0)
+                y_true *= (1.0 - 0.020 * (t_rc ** 2.0))
+                w_blend = rear_w * rear_w * (3.0 - 2.0 * rear_w)
+                y_loc = y_true * (1.0 - w_blend) + yy * w_blend
+            else:
+                y_loc = yy
             # Автомобильная скульптура заднего бампера: мягкий подгиб снизу + упругий верхний пояс
-            tuck = 0.032 * ((1.0 - u) ** 2.1)
+            # (на верхнем шве крылышка u=1 подгиб строго 0 мм!)
+            tuck = (0.032 * rear_w + 0.012 * (1.0 - rear_w)) * ((1.0 - u) ** 2.2)
             bulge = (
                 0.012 * math.sin(math.pi * clamp((u - 0.35) / 0.65, 0.0, 1.0)) * rear_w
                 if u > 0.35 else 0.0
             )
-            p_o = Vector((xx, yy, zz)) + n_dir * (bulge - tuck)
+            p_o = Vector((xx, y_loc, zz)) + n_dir * (bulge - tuck)
             p_i = p_o - n_dir * BUMPER_THICKNESS
             row_o.append(p_o)
             row_i.append(p_i)
@@ -2286,7 +2319,7 @@ def build_doors(body_ob, mats, collection):
         frame_w = 0.024
         frame_d = 0.024
 
-        def _add_sash_bar(pts_3d):
+        def _add_sash_bar(pts_3d, b_pillar_seg_range=None):
             rings = []
             n_p = len(pts_3d)
             for idx, p in enumerate(pts_3d):
@@ -2312,14 +2345,26 @@ def build_doors(body_ob, mats, collection):
                 rings.append(ring)
             for i in range(n_p - 1):
                 r0, r1 = rings[i], rings[i + 1]
+                mat_i = (
+                    1 if (b_pillar_seg_range is not None
+                          and b_pillar_seg_range[0] <= i < b_pillar_seg_range[1])
+                    else 0
+                )
                 for k in range(4):
                     kn = (k + 1) % 4
-                    bm.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
-            bm.faces.new((rings[0][0], rings[0][3], rings[0][2], rings[0][1]))
-            bm.faces.new((rings[-1][0], rings[-1][1], rings[-1][2], rings[-1][3]))
+                    f_s = bm.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
+                    f_s.material_index = mat_i
+            f0 = bm.faces.new((rings[0][0], rings[0][3], rings[0][2], rings[0][1]))
+            f1 = bm.faces.new((rings[-1][0], rings[-1][1], rings[-1][2], rings[-1][3]))
+            if b_pillar_seg_range is not None:
+                if b_pillar_seg_range[0] == 0:
+                    f0.material_index = 1
+                if b_pillar_seg_range[1] == n_p - 1:
+                    f1.material_index = 1
 
         # Непрерывная дуга оконной рамки: передняя стойка -> верхняя планка -> задняя стойка
-        # y_off=-0.014: наружная грань рамки (y_abs - 0.002) строго заподлицо со стойками A/B/C
+        # Стойка рамки вдоль Pillar_B окрашена в глянцево-чёрный (слот 1 = Piano_Black),
+        # убирая синие вертикальные полоски по бокам центральной стойки B!
         arch_pts = []
         for k in range(6):
             t = 0.015 + 0.965 * (k / 5.0)
@@ -2330,11 +2375,14 @@ def build_doors(body_ob, mats, collection):
         for k in range(1, 6):
             t = 0.98 - 0.965 * (k / 5.0)
             arch_pts.append(_sash_pt(xb_bot * (1.0 - t) + xb_top * t, t, y_off=-0.014))
-        _add_sash_bar(arch_pts)
+        # Сегменты 0..5 — передняя стойка рамки, 6..8 — верх, 9..14 — задняя стойка рамки
+        b_seg = (9, 15) if is_front else (0, 6)
+        _add_sash_bar(arch_pts, b_pillar_seg_range=b_seg)
 
         door_ob = bmesh_to_object(name, bm, material=mats['paint'],
                                   smooth=True, collection=collection, auto_smooth_deg=55.0,
                                   bevel=0.0028, bevel_segs=2, subsurf=1)
+        door_ob.data.materials.append(mats['piano_black'])
         uv_box(door_ob, scale=1.5)
         door_ob.location = origin
         door_ob.parent = body_ob
@@ -2384,7 +2432,7 @@ def build_doors(body_ob, mats, collection):
         dh_ob.parent = body_ob
         dh_ob.matrix_parent_inverse = body_ob.matrix_world.inverted()
 
-        # 5. Наружная дверная ручка (привязана к двери, повторяет side_surface_y)
+        # 5. Наружная дверная ручка Volvo S90 (корпус в цвет кузова + верхняя хром-планка)
         bm_hdl = bmesh.new()
         x_hdl_w = hx - door_len + 0.18
         z_hdl_w = BELT(x_hdl_w) - 0.115
@@ -2392,17 +2440,25 @@ def build_doors(body_ob, mats, collection):
         xh_l = x_hdl_w - hx
         yh_l = y_surf_w - hinge_y
         zh_l = z_hdl_w - hinge_z
-        # Стойки ручки + вытянутая рукоятка с зазором от полотна двери
+        # Стойки ручки + основная рукоятка в цвет кузова (material_index = 0)
         add_box(bm_hdl, xh_l - 0.082, xh_l + 0.082,
-                yh_l + side * 0.014, yh_l + side * 0.028, zh_l - 0.012, zh_l + 0.012)
+                yh_l + side * 0.014, yh_l + side * 0.027, zh_l - 0.012, zh_l + 0.008)
         add_box(bm_hdl, xh_l - 0.075, xh_l - 0.052,
-                yh_l - side * 0.002, yh_l + side * 0.012, zh_l - 0.010, zh_l + 0.010)
+                yh_l - side * 0.002, yh_l + side * 0.013, zh_l - 0.010, zh_l + 0.008)
         add_box(bm_hdl, xh_l + 0.052, xh_l + 0.075,
-                yh_l - side * 0.002, yh_l + side * 0.012, zh_l - 0.010, zh_l + 0.010)
+                yh_l - side * 0.002, yh_l + side * 0.013, zh_l - 0.010, zh_l + 0.008)
+        n_paint_faces = len(bm_hdl.faces)
+        # Верхняя тонкая хромированная планка S90 Inscription (material_index = 1)
+        add_box(bm_hdl, xh_l - 0.078, xh_l + 0.078,
+                yh_l + side * 0.016, yh_l + side * 0.029, zh_l + 0.0085, zh_l + 0.014)
+        bm_hdl.faces.ensure_lookup_table()
+        for f_idx in range(n_paint_faces, len(bm_hdl.faces)):
+            bm_hdl.faces[f_idx].material_index = 1
         handle_name = name.replace('Door_', 'Door_Handle_')
-        hdl_ob = bmesh_to_object(handle_name, bm_hdl, material=mats['chrome'],
+        hdl_ob = bmesh_to_object(handle_name, bm_hdl, material=mats['paint'],
                                  smooth=True, collection=collection, auto_smooth_deg=55.0,
-                                 bevel=0.0022, bevel_segs=2)
+                                 bevel=0.0020, bevel_segs=2)
+        hdl_ob.data.materials.append(mats['chrome'])
         uv_box(hdl_ob, scale=10.0)
         hdl_ob.parent = door_ob
         hdl_ob.location = Vector((0.0, 0.0, 0.0))
@@ -2881,8 +2937,8 @@ def build_hood(body_ob, mats, collection):
             t_f = t_f * t_f * (3.0 - 2.0 * t_f)
             x = x_nom * (1.0 - t_f) + (x_start + (x_front_edge - x_start) * u_x) * t_f
             edge_drop = 0.014 * (abs(v) ** 2.8)
-            # Плавный передний клюв капота S90: мягко спускается к верху решётки радиатора и фар
-            nose_drop = 0.044 * (max(0.0, (u_x - 0.70) / 0.30) ** 1.75)
+            # Плавный передний клюв капота S90: мягко спускается прямо к верху решётки и фар
+            nose_drop = 0.052 * (max(0.0, (u_x - 0.68) / 0.32) ** 1.70)
             z_top = hood_deck_z(min(x, X_MAX - 0.05), y) - edge_drop - nose_drop + 0.001
             row_out.append(Vector((x - HOOD_HINGE_X, y, z_top - hz)))
             row_in.append(Vector((x - HOOD_HINGE_X, y, z_top - HOOD_LID_THICKNESS - hz)))
@@ -3225,11 +3281,14 @@ def build_volvo_details(body_ob, mats, collection):
     # (Radiator_Support): огибают передний угол крыла до y=0.775, плотно заполняя нишу
     # между передним крылом, капотом и съёмным передним бампером!
     for label, sy in (('L', 1.0), ('R', -1.0)):
-        y_in, y_out = sy * 0.415, sy * 0.784
+        # y_out=0.736 строго внутри передней кромки Fender_Front (~0.775) -> 0 пробоев крыла!
+        # z_hi=0.734 плотно примыкает к нижнему краю капота и переднего крыла -> 0 пещеры сверху!
+        y_in, y_out = sy * 0.415, sy * 0.736
         ya, yb = (y_in, y_out) if y_in < y_out else (y_out, y_in)
-        z_lo, z_hi = 0.556, 0.714
+        z_lo, z_hi = 0.556, 0.734
 
-        # 3a. Глубокий глянцево-чёрный корпус блок-фары (клиновидный верх к крылу, без кармана!)
+        # 3a. Глубокий глянцево-чёрный корпус блок-фары — утоплен заподлицо с передним
+        # скосом капота/крыла и U-вырезом бампера (без торчащего вперёд «кирпича»!)
         bm_hl = bmesh.new()
         outer_h = []
         inner_h = []
@@ -3241,16 +3300,20 @@ def build_volvo_details(body_ob, mats, collection):
             for i in range(ny_h):
                 vy = i / (ny_h - 1)
                 yy = ya + (yb - ya) * vy
-                # Клиновидный верх фары: чуть выше на наружном углу крыла (как у Volvo S90)
-                t_out = clamp((abs(yy) - 0.415) / 0.37, 0.0, 1.0)
-                z_top_loc = z_hi - 0.008 + 0.018 * t_out
+                # Клиновидный верх фары: мягко повторяет линию капота и крыла
+                t_out = clamp((abs(yy) - 0.415) / 0.325, 0.0, 1.0)
+                z_top_loc = z_hi - 0.008 + 0.012 * t_out
                 zz = z_lo + (z_top_loc - z_lo) * vz
-                # На наружном краю фары (|yy| > 0.66) плавный wrap-around заворот к крылу
-                t_wrap = clamp((abs(yy) - 0.66) / 0.125, 0.0, 1.0)
-                sx = _surf_x(yy, zz, front=True) + 0.008 - 0.045 * (t_wrap ** 1.8)
-                # Задняя стенка блок-фары садится в опорную чашу Radiator_Support
+                # Плавный wrap-around заворот к крылу + аэродинамический наклон верха назад (-22 мм)
+                t_wrap = clamp((abs(yy) - 0.64) / 0.10, 0.0, 1.0)
+                sx = (
+                    front_nose_surface_x(yy)
+                    - 0.016
+                    - 0.022 * (vz ** 1.15)
+                    - 0.032 * (t_wrap ** 1.8)
+                )
                 row_o.append(Vector((sx, yy, zz)))
-                row_i.append(Vector((min(2.245, sx - 0.048), yy * 0.94, zz)))
+                row_i.append(Vector((min(2.245, sx - 0.050), yy * 0.94, zz)))
             outer_h.append(row_o)
             inner_h.append(row_i)
         _add_thick_grid(bm_hl, outer_h, inner_h)
@@ -3259,7 +3322,7 @@ def build_volvo_details(body_ob, mats, collection):
         uv_box(hl_ob, scale=5.0)
         objs.append(hl_ob)
 
-        # 3b. Светодиодная подпись «Молот Тора» (контурная, повторяет кривизну фары!)
+        # 3b. Светодиодная подпись «Молот Тора» (утоплена внутри корпуса прямо за линзой!)
         bm_drl = bmesh.new()
         z_mid = 0.5 * (z_lo + z_hi)
 
@@ -3267,23 +3330,40 @@ def build_volvo_details(body_ob, mats, collection):
             py0 = y_in + (y_out - y_in) * u0
             py1 = y_in + (y_out - y_in) * u1
             p_lo, p_hi = (py0, py1) if py0 < py1 else (py1, py0)
-            _add_curved_strip(bm_drl, p_lo, p_hi, z_mid + dz0, z_mid + dz1,
-                              front=True, off_out=0.015, thick=0.008, ny=7, nz=2)
+            o_pts, i_pts = [], []
+            for jj in range(2):
+                zz_d = (z_mid + dz0) + (dz1 - dz0) * jj
+                vz_d = clamp((zz_d - z_lo) / max(z_hi - z_lo, 0.05), 0.0, 1.0)
+                ro_d, ri_d = [], []
+                for ii in range(7):
+                    yy_d = p_lo + (p_hi - p_lo) * (ii / 6.0)
+                    t_w = clamp((abs(yy_d) - 0.64) / 0.10, 0.0, 1.0)
+                    sx_d = (
+                        front_nose_surface_x(yy_d)
+                        - 0.011
+                        - 0.022 * (vz_d ** 1.15)
+                        - 0.032 * (t_w ** 1.8)
+                    )
+                    ro_d.append(Vector((sx_d, yy_d, zz_d)))
+                    ri_d.append(Vector((sx_d - 0.007, yy_d, zz_d)))
+                o_pts.append(ro_d)
+                i_pts.append(ri_d)
+            _add_thick_grid(bm_drl, o_pts, i_pts)
 
         # Длинный ствол молота Тора (уходит к переднему крылу)
-        _drl_curved(0.18, 0.86, -0.009, +0.009)
+        _drl_curved(0.18, 0.88, -0.008, +0.008)
         # Вертикальная головка молота у решётки радиатора
-        _drl_curved(0.05, 0.15, -0.042, +0.042)
+        _drl_curved(0.06, 0.15, -0.042, +0.042)
         # Верхний и нижний «усик» головки молота
-        _drl_curved(0.05, 0.25, +0.044, +0.054)
-        _drl_curved(0.05, 0.25, -0.054, -0.044)
+        _drl_curved(0.06, 0.26, +0.044, +0.053)
+        _drl_curved(0.06, 0.26, -0.053, -0.044)
         drl_ob = bmesh_to_object(f'Headlight_DRL_{label}', bm_drl,
                                  material=mats['drl'], smooth=True,
                                  collection=collection, bevel=0.0015, bevel_segs=1)
         uv_box(drl_ob, scale=8.0)
         objs.append(drl_ob)
 
-        # 3c. Прозрачный огибающий рассеиватель (линза) поверх фары (wrap-around)
+        # 3c. Прозрачный огибающий рассеиватель (линза) поверх фары — заподлицо с капотом и бампером
         bm_ln = bmesh.new()
         ln_out, ln_in = [], []
         for j in range(nz_h):
@@ -3291,12 +3371,17 @@ def build_volvo_details(body_ob, mats, collection):
             ro, ri = [], []
             for i in range(ny_h):
                 vy = i / (ny_h - 1)
-                yy = (ya - 0.003) + (yb - ya + 0.006) * vy
-                t_out = clamp((abs(yy) - 0.415) / 0.37, 0.0, 1.0)
-                z_top_loc = z_hi - 0.004 + 0.018 * t_out
+                yy = (ya - 0.002) + (yb - ya + 0.004) * vy
+                t_out = clamp((abs(yy) - 0.415) / 0.325, 0.0, 1.0)
+                z_top_loc = z_hi - 0.004 + 0.012 * t_out
                 zz = (z_lo - 0.004) + (z_top_loc - (z_lo - 0.004)) * vz
-                t_wrap = clamp((abs(yy) - 0.66) / 0.125, 0.0, 1.0)
-                sx = _surf_x(yy, zz, front=True) + 0.018 - 0.045 * (t_wrap ** 1.8)
+                t_wrap = clamp((abs(yy) - 0.64) / 0.10, 0.0, 1.0)
+                sx = (
+                    front_nose_surface_x(yy)
+                    - 0.006
+                    - 0.022 * (vz ** 1.15)
+                    - 0.032 * (t_wrap ** 1.8)
+                )
                 ro.append(Vector((sx, yy, zz)))
                 ri.append(Vector((sx - 0.005, yy, zz)))
             ln_out.append(ro)
@@ -3490,13 +3575,16 @@ def build_volvo_details(body_ob, mats, collection):
         objs.append(ww_ob)
 
         # 6b. Скруглённая скульптурная бровь колёсной арки в цвет кузова (6-точечный профиль)
+        # Ограничена линией шва крыло <-> бампер, чтобы синяя кромка крыла НЕ свисала
+        # «клыком» поверх съёмных антрацитовых бамперов!
         bm_wa = bmesh.new()
         r_lip_in = WHEEL_R + 0.024
         r_lip_mid = WHEEL_R + 0.044
         r_lip_out = WHEEL_R + 0.068
+        ang_start_deg, ang_end_deg = (8.0, 188.0) if tag.startswith('F') else (-8.0, 164.0)
         rings_wa = []
         for i in range(seg_a + 1):
-            ang = math.radians(-8.0 + 196.0 * i / seg_a)
+            ang = math.radians(ang_start_deg + (ang_end_deg - ang_start_deg) * i / seg_a)
             ca, sa = math.cos(ang), math.sin(ang)
             x_in, z_in = axle + r_lip_in * ca, WHEEL_Z + r_lip_in * sa
             x_mid, z_mid = axle + r_lip_mid * ca, WHEEL_Z + r_lip_mid * sa
