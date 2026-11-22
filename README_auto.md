@@ -22,6 +22,8 @@
 | `render_obj_png.py` | software-рендер OBJ → PNG (NumPy/Pillow, не требует Blender) |
 | `tests/test_geometry.py` | автотесты валидации экспортированной геометрии |
 | `requirements-render.txt` | зависимости для software рендеринга (numpy, Pillow) |
+| `render_blender_cycles.py` | рендер сцены в desktop Blender Cycles → `renders/cycles/` |
+| `run_blender_wasm.py` | запуск bpy-скрипта через Blender WebAssembly (npm, Node 24+) |
 | `README_auto.md` | эта документация |
 
 ## Требования
@@ -279,3 +281,44 @@ python3 -m unittest discover -s tests -v
 отсутствие вырожденных граней, габариты модели close к реальным (5.00 × 1.872 × 1.456 м),
 соответствие используемых материалов определённым в MTL.
 Тест пропускается, если OBJ ещё не сгенерирован.
+
+## Полный пайплайн рендеринга
+
+### Вариант А: software-превью без Blender (работает в этой песочнице)
+
+```bash
+pip install -r requirements-render.txt
+blender -b -noaudio car_realistic.blend -P export_obj.py   # один раз, нужен Blender
+python3 render_obj_png.py exports/car_ue.obj               # PNG без Blender
+python3 serve_preview.py                                    # http://localhost:4173
+```
+
+### Вариант Б: настоящий Cycles рендер в desktop Blender 4.2
+
+```bash
+blender -b -noaudio -P car_build.py                         # сцена + .blend
+blender -b -noaudio car_realistic.blend -P qa.py            # геометрия (нули)
+blender -b -noaudio car_realistic.blend --python render_blender_cycles.py
+                                                            # 6 кадров в renders/cycles/
+```
+
+Результат: `renders/cycles/car_ue_{front_3_4,side,rear_3_4,interior,interior2,doors_open}.png`
+
+### Вариант В: Blender WebAssembly (Arena runtime)
+
+```bash
+python3 run_blender_wasm.py car_build.py                    # scena через WASM
+```
+
+WASM-рантайм (Blender 5.3 alpha) может строить и сохранять `.blend`, но
+**не рендерит** изображения. Для финальных PNG используйте Вариант Б.
+
+## Порядок итерации (полный)
+
+1. правка в `car_build.py` (геометрия / материалы / свет)
+2. пересборка: `blender -b -noaudio -P car_build.py`
+3. проверка геометрии: `blender -b -noaudio car_realistic.blend -P qa.py` (нули)
+4. файловые карты: `blender -b -noaudio -P bake_maps.py` (опционально)
+5. рендер: Вариант Б (Cycles) или Вариант А (software-превью)
+6. экспорт в UE: `blender -b -noaudio car_realistic.blend -P ue_preview_export.py`
+7. galerie рендеров: `python3 render_gallery.py` (порт 8080) или `serve_preview.py` (порт 4173)
