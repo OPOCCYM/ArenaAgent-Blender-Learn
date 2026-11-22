@@ -13,6 +13,11 @@ from car_geometry import (
     CABIN_FLOOR_Z,
     CABIN_SILL_Z,
     DOORS_SPEC,
+    FENDER_X_FRONT,
+    FENDER_X_REAR,
+    FRONT_BUMPER_WING_X,
+    FRONT_BUMPER_X,
+    FRONT_CLIP_X,
     GROUND_CLEARANCE,
     HEIGHT,
     HOOD_BAY_Z,
@@ -50,6 +55,8 @@ from car_geometry import (
     cabin_cut_mask,
     dome_scale,
     door_swing_tip_y,
+    fender_bottom_z,
+    fender_bumper_seam_z,
     glass_section,
     hood_bay_mask,
     hood_lift_endpoints,
@@ -206,5 +213,18 @@ def test_hood_bay_and_gas_lifts_telescope_validly():
     assert HOOD_LIFT_CYL_LEN < d_closed
     assert HOOD_LIFT_ROD_LEN < d_closed
     assert HOOD_LIFT_CYL_LEN + HOOD_LIFT_ROD_LEN > d_open + 0.03
+
+
+def test_front_fender_and_bumper_separation_geometry():
+    """Передние крылья отделены от моторного щита и бампера и имеют реальный вырез арки."""
+    assert FRONT_CLIP_X < AXLE_F < FRONT_BUMPER_WING_X < FENDER_X_FRONT < FRONT_BUMPER_X
+    assert FENDER_X_REAR < FRONT_CLIP_X
+    # На оси переднего колеса нижняя кромка крыла реально поднята над колесом (вырез арки)
+    assert fender_bottom_z(AXLE_F) > WHEEL_Z + 0.35
+    # За аркой у передней двери крыло опускается к линии порога
+    assert fender_bottom_z(FENDER_X_REAR) < 0.25
+    # Линия стыка крыло-бампер плавно поднимается вперёд к фаре
+    assert fender_bumper_seam_z(FENDER_X_FRONT) > fender_bumper_seam_z(FRONT_BUMPER_WING_X) + 0.15
+
 
 

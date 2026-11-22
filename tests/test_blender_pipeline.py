@@ -65,7 +65,10 @@ def test_collections_and_bounding_box(built_scene_dir):
         'Door_Handle_Front_Left', 'Door_Handle_Front_Right',
         'Door_Handle_Rear_Left', 'Door_Handle_Rear_Right',
         'Mirror_L', 'Mirror_R',
-        'Hood_Lid', 'Engine_Bay',
+        'Hood_Lid', 'Engine_Bay', 'Engine_Metal', 'Coolant_Tank',
+        'Fender_Front_L', 'Fender_Front_R', 'Front_Bumper',
+        'Front_Subframe', 'Crash_Beam', 'Fender_Apron_L', 'Fender_Apron_R',
+        'Radiator_Support', 'Cowl_Panel',
         'Hood_Hinge_Mount_L', 'Hood_Hinge_Mount_R',
         'Hood_Hinge_Arm_L', 'Hood_Hinge_Arm_R',
         'Hood_Lift_Mount_L', 'Hood_Lift_Mount_R',
@@ -87,8 +90,10 @@ def test_collections_and_bounding_box(built_scene_dir):
     ):
         assert required in car_names, f'Отсутствует обязательный объект {required}'
 
-    # В зоне дверных проёмов Body действительно имеет сквозной вырез до уровня порога
+    # В зоне дверных проёмов Body действительно имеет сквозной вырез до уровня порога,
+    # а передняя часть (крылья и бампер) реально отделена от монокока Body по моторному щиту
     body = bpy.data.objects['Body']
+    assert max(v.co.x for v in body.data.vertices) < 1.00
     for x_probe in (-0.50, 0.35):
         zs_near = [v.co.z for v in body.data.vertices if abs(v.co.x - x_probe) < 0.04]
         assert zs_near and max(zs_near) < 0.32, f'Нет сквозного выреза в Body на x={x_probe}'

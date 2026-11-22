@@ -37,13 +37,19 @@ from car_geometry import (  # noqa: E402
     AXLE_F,
     AXLE_R,
     BELT,
+    BUMPER_THICKNESS,
     CABIN_CUT_X_FRONT,
     CABIN_CUT_X_REAR,
     CABIN_FLOOR_Z,
     CABIN_SILL_Z,
     CAR_COLLECTION,
     DOORS_SPEC,
-    HOOD_BAY_Z,
+    FENDER_THICKNESS,
+    FENDER_X_FRONT,
+    FENDER_X_REAR,
+    FRONT_BUMPER_WING_X,
+    FRONT_BUMPER_X,
+    FRONT_CLIP_X,
     HOOD_HINGE_X,
     HOOD_HINGE_Y,
     HOOD_LID_THICKNESS,
@@ -52,7 +58,6 @@ from car_geometry import (  # noqa: E402
     HOOD_LIFT_ROD_LEN,
     HOOD_LIFT_Y,
     HOOD_OPEN_DEG,
-    HOOD_X_FRONT,
     HOOD_X_REAR,
     LENGTH,
     N_SECTIONS,
@@ -91,6 +96,8 @@ from car_geometry import (  # noqa: E402
     body_section,
     clamp,
     dome_scale,
+    fender_bottom_z,
+    fender_bumper_seam_z,
     hood_deck_z,
     hood_hinge_z,
     hood_lift_lid_local_xz,
@@ -634,9 +641,12 @@ def shell_patch(name, origin, normal, size=(0.4, 0.3), segs=(4, 3),
 # 4. Кузов и остекление
 # --------------------------------------------------------------------------- #
 def build_body(mats, collection):
-    """Строит замкнутый лофт кузова между TIP_R и TIP_F с 3D-куполами торцов."""
+    """Строит замкнутый лофт несущего кузова-монокока от хвостового купола (X_MIN)
+    до моторного щита (FRONT_CLIP_X). Передние крылья, передний бампер, капот и силовая рама
+    передка строятся отдельными съёмными/конструктивными узлами, как на реальном автомобиле."""
     bm = bmesh.new()
-    xs = [TIP_R + (TIP_F - TIP_R) * i / (N_SECTIONS - 1) for i in range(N_SECTIONS)]
+    n_sec = max(130, int(N_SECTIONS * 0.72))
+    xs = [TIP_R + (FRONT_CLIP_X - TIP_R) * i / (n_sec - 1) for i in range(n_sec)]
     loops = [body_section(x) for x in xs]
     vcount = len(loops[0])
     verts = []
@@ -644,7 +654,7 @@ def build_body(mats, collection):
         for (y, z) in loop:
             verts.append(bm.verts.new(Vector((x, y, z))))
 
-    for i in range(N_SECTIONS - 1):
+    for i in range(n_sec - 1):
         base = i * vcount
         nbase = (i + 1) * vcount
         for k in range(vcount):
@@ -655,44 +665,301 @@ def build_body(mats, collection):
                 verts[nbase + k],
             ))
 
-    # Замыкание торцов: 3D-купола по суперэллипсу от TIP_R -> X_MIN и от TIP_F -> X_MAX
-    endcaps = (
-        (X_MIN, 0, xs[0], True),            # корма (-X)
-        (X_MAX, N_SECTIONS - 1, xs[-1], False),  # нос (+X)
-    )
+    # Замыкание кормы (-X): 3D-купол по суперэллипсу от TIP_R -> X_MIN
     n_rings = 7
-    for x_end, i0, x_start, flip_cap in endcaps:
-        prev = [verts[i0 * vcount + k] for k in range(vcount)]
-        base_loop = loops[i0]
-        zm = 0.5 * (ZB(x_start) + ZR(x_start))
-        tip = bm.verts.new(Vector((x_end, 0.0, zm)))
-        # n_rings - 1 промежуточных колец с ненулевым масштабом; последнее смыкается в tip
-        for step in range(1, n_rings):
-            u = step / float(n_rings)
-            s = max(0.06, dome_scale(u))
-            xr = x_start + (x_end - x_start) * u
-            ring = [
-                bm.verts.new(Vector((xr, y * s, zm + (z - zm) * s)))
-                for (y, z) in base_loop
-            ]
-            for k in range(vcount):
-                kn = (k + 1) % vcount
-                if flip_cap:
-                    bm.faces.new((prev[kn], prev[k], ring[k], ring[kn]))
-                else:
-                    bm.faces.new((prev[k], prev[kn], ring[kn], ring[k]))
-            prev = ring
+    prev = [verts[k] for k in range(vcount)]
+    base_loop = loops[0]
+    zm_r = 0.5 * (ZB(xs[0]) + ZR(xs[0]))
+    tip_r = bm.verts.new(Vector((X_MIN, 0.0, zm_r)))
+    for step in range(1, n_rings):
+        u = step / float(n_rings)
+        s = max(0.06, dome_scale(u))
+        xr = xs[0] + (X_MIN - xs[0]) * u
+        ring = [
+            bm.verts.new(Vector((xr, y * s, zm_r + (z - zm_r) * s)))
+            for (y, z) in base_loop
+        ]
         for k in range(vcount):
             kn = (k + 1) % vcount
-            if flip_cap:
-                bm.faces.new((tip, prev[k], prev[kn]))
-            else:
-                bm.faces.new((tip, prev[kn], prev[k]))
+            bm.faces.new((prev[kn], prev[k], ring[k], ring[kn]))
+        prev = ring
+    for k in range(vcount):
+        kn = (k + 1) % vcount
+        bm.faces.new((tip_r, prev[k], prev[kn]))
 
-    smooth_laplacian(bm, iters=1, factor=0.22)
+    # Замыкание передней стенки монокока (моторный щит на FRONT_CLIP_X)
+    last_base = (n_sec - 1) * vcount
+    zm_f = 0.5 * (ZB(FRONT_CLIP_X) + BELT(FRONT_CLIP_X))
+    center_f = bm.verts.new(Vector((FRONT_CLIP_X + 0.004, 0.0, zm_f)))
+    for k in range(vcount):
+        kn = (k + 1) % vcount
+        bm.faces.new((center_f, verts[last_base + kn], verts[last_base + k]))
+
+    smooth_laplacian(bm, iters=1, factor=0.18)
     ob = bmesh_to_object('Body', bm, material=mats['paint'], smooth=True, collection=collection)
     uv_top(ob)
     return ob
+
+
+def build_front_structure_and_panels(body_ob, mats, collection):
+    """Строит разделённую переднюю часть автомобиля по реальной заводской схеме:
+      1) Несущий каркас: Front_Subframe (лонжероны, моторный щит, подрамник, краш-боксы),
+         Crash_Beam (алюминиевый усилитель бампера), Fender_Apron_L/R (брызговики с чашками
+         стоек и полками крыльев), Radiator_Support («телевизор» с замком капота);
+      2) Отсек капота: Cowl_Panel (жабо под лобовым стеклом, уплотнитель, стеклоочистители);
+      3) Отдельные внешние навесные панели с реальными зазорами ~6 мм:
+         Fender_Front_L / Fender_Front_R (передние крылья с вырезом арки и верхним фланцем)
+         и Front_Bumper (отдельный съёмный передний бампер с боковыми крылышками)."""
+    objs = []
+
+    def _attach(ob):
+        ob.parent = body_ob
+        ob.matrix_parent_inverse = body_ob.matrix_world.inverted()
+        objs.append(ob)
+        return ob
+
+    # 1. Несущий силовой каркас передка (Front_Subframe: моторный щит, лонжероны, подрамник)
+    bm_sf = bmesh.new()
+    # Моторный щит (перегородка салона и моторного отсека)
+    add_box(bm_sf, FRONT_CLIP_X + 0.005, 1.15, -0.74, 0.74, 0.22, 0.84)
+    # Продольные силовые лонжероны (левый и правый) + передние краш-боксы
+    for side in (1.0, -1.0):
+        ya, yb = (side * 0.43, side * 0.53)
+        y0, y1 = (ya, yb) if ya < yb else (yb, ya)
+        add_box(bm_sf, 1.15, 2.22, y0, y1, 0.27, 0.39)
+        # Энергопоглощающий краш-бокс к усилителю бампера
+        add_box(bm_sf, 2.222, 2.315, y0 + 0.008, y1 - 0.008, 0.29, 0.39)
+    # Нижний подрамник двигателя и силовые поперечины
+    add_box(bm_sf, 1.24, 1.98, -0.43, 0.43, 0.215, 0.265)
+    add_box(bm_sf, 1.24, 1.34, -0.53, 0.53, 0.268, 0.320)
+    add_box(bm_sf, 1.92, 2.02, -0.53, 0.53, 0.268, 0.320)
+    sf_ob = bmesh_to_object('Front_Subframe', bm_sf, material=mats['carbon'],
+                            smooth=True, collection=collection)
+    uv_box(sf_ob, scale=2.0)
+    _attach(sf_ob)
+
+    # 2. Алюминиевая силовая балка усилителя переднего бампера (Crash_Beam — видна за бампером)
+    bm_cb = bmesh.new()
+    add_box(bm_cb, 2.318, 2.375, -0.60, 0.60, 0.325, 0.435)
+    cb_ob = bmesh_to_object('Crash_Beam', bm_cb, material=mats['alloy'],
+                            smooth=True, collection=collection)
+    uv_box(cb_ob, scale=4.0)
+    _attach(cb_ob)
+
+    # 3. Верхние брызговики / полки крыльев с опорными чашками стоек (Fender_Apron_L/R)
+    for label, side in (('L', 1.0), ('R', -1.0)):
+        bm_ap = bmesh.new()
+        # Продольная силовая полка брызговика (повторяет наклон капота от щита к «телевизору»)
+        n_ap = 10
+        ap_rings = []
+        for i in range(n_ap):
+            x = 1.02 + (2.18 - 1.02) * i / (n_ap - 1)
+            z_top = BELT(x) - 0.036
+            z_bot = z_top - 0.16
+            y_in = side * (WR(x) - 0.065)
+            y_out = side * (WR(x) + 0.045)
+            ya, yb = (y_in, y_out) if y_in < y_out else (y_out, y_in)
+            ap_rings.append([
+                bm_ap.verts.new(Vector((x, ya, z_bot))),
+                bm_ap.verts.new(Vector((x, yb, z_bot))),
+                bm_ap.verts.new(Vector((x, yb, z_top))),
+                bm_ap.verts.new(Vector((x, ya, z_top))),
+            ])
+        for i in range(n_ap - 1):
+            r0, r1 = ap_rings[i], ap_rings[i + 1]
+            for k in range(4):
+                kn = (k + 1) % 4
+                bm_ap.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
+        bm_ap.faces.new((ap_rings[0][0], ap_rings[0][3], ap_rings[0][2], ap_rings[0][1]))
+        bm_ap.faces.new((ap_rings[-1][0], ap_rings[-1][1], ap_rings[-1][2], ap_rings[-1][3]))
+
+        # Опорная чашка передней амортизационной стойки на оси AXLE_F = +1.60
+        _add_z_cylinder(bm_ap, 0.095, 0.50, 0.79, seg=20, center_xy=(AXLE_F, side * 0.54))
+        # Резиновый отбойник капота на переднем конце брызговика
+        _add_z_cylinder(bm_ap, 0.014, 0.77, 0.805, seg=12, center_xy=(2.08, side * 0.54))
+        ap_ob = bmesh_to_object(f'Fender_Apron_{label}', bm_ap, material=mats['carbon'],
+                                smooth=True, collection=collection)
+        uv_box(ap_ob, scale=3.0)
+        _attach(ap_ob)
+
+    # 4. «Телевизор» — передняя рамка радиатора и замок капота (Radiator_Support)
+    bm_rs = bmesh.new()
+    # Верхняя поперечина «телевизора» (соединяет левый и правый брызговики за решёткой)
+    add_box(bm_rs, 2.13, 2.245, -0.62, 0.62, 0.725, 0.785)
+    # Нижняя траверса под радиатор
+    add_box(bm_rs, 2.10, 2.22, -0.54, 0.54, 0.245, 0.290)
+    # Боковые вертикальные стойки «телевизора» вокруг радиатора
+    for side in (1.0, -1.0):
+        ya, yb = (side * 0.46, side * 0.54)
+        y0, y1 = (ya, yb) if ya < yb else (yb, ya)
+        add_box(bm_rs, 2.12, 2.21, y0, y1, 0.292, 0.723)
+    # Центральный замок капота на верхней балке
+    add_box(bm_rs, 2.16, 2.24, -0.055, 0.055, 0.787, 0.818)
+    rs_ob = bmesh_to_object('Radiator_Support', bm_rs, material=mats['carbon'],
+                            smooth=True, collection=collection)
+    uv_box(rs_ob, scale=3.0)
+    _attach(rs_ob)
+
+    # 5. Жабо (короб водостока под лобовым стеклом), уплотнитель капота и дворники (Cowl_Panel)
+    bm_cw = bmesh.new()
+    z_cw = BELT(1.04) - 0.012
+    # Основная пластиковая панель жабо от основания лобового стекла к моторному щиту
+    add_box(bm_cw, FRONT_CLIP_X + 0.006, 1.155, -0.78, 0.78, z_cw - 0.042, z_cw)
+    # Резиновый уплотнитель по передней кромке жабо (отделяет жабо от моторного отсека)
+    add_box(bm_cw, 1.145, 1.168, -0.68, 0.68, z_cw + 0.002, z_cw + 0.018)
+    # Два поводка и щётки стеклоочистителей на жабо
+    for wy0, wy1 in ((-0.58, -0.04), (0.04, 0.58)):
+        add_box(bm_cw, 0.99, 1.015, wy0, wy1, z_cw + 0.004, z_cw + 0.018)
+    cw_ob = bmesh_to_object('Cowl_Panel', bm_cw, material=mats['carbon'],
+                            smooth=True, collection=collection)
+    uv_box(cw_ob, scale=4.0)
+    _attach(cw_ob)
+
+    # 6. ОТДЕЛЬНЫЕ передние крылья (Fender_Front_L / Fender_Front_R) с вырезом арки и фланцем
+    # Плотный набор X-сечений: сгущение в зоне арки колеса и диагонального стыка с бампером
+    fender_xs = sorted({
+        FENDER_X_REAR, 0.98, 1.06, 1.14, 1.19,
+        *[1.212 + (1.988 - 1.212) * k / 20.0 for k in range(21)],
+        2.02, 2.08, 2.15, 2.22, FENDER_X_FRONT,
+    })
+    for label, side in (('L', 1.0), ('R', -1.0)):
+        bm_f = bmesh.new()
+        outer_pts = []
+        inner_pts = []
+        for x in fender_xs:
+            zb_f = fender_bottom_z(x)
+            belt_x = BELT(x)
+            y_belt = side_surface_y(x, belt_x)
+            y_hood_edge = WR(x) + 0.050  # зазор ~6 мм до края капота (WR + 0.044)
+            z_hood_edge = hood_deck_z(x, y_hood_edge) - 0.016
+            y_flange = WR(x) + 0.004     # загнутая внутрь монтажная полка под капотом
+            z_flange = z_hood_edge - 0.036
+
+            # 12 точек по профилю сечения крыла:
+            # 0..6 — борт от нижней кромки/арки до плеча BELT;
+            # 7..9 — скруглённый верхний гребень крыла к линии капота;
+            # 10..11 — загнутый внутрь монтажный фланец крыла (виден при открытом капоте!)
+            profile = []
+            for j in range(7):
+                u = j / 6.0
+                zz = zb_f + (belt_x - zb_f) * u
+                yy = side_surface_y(x, zz)
+                profile.append((yy, zz))
+            for k in range(1, 4):
+                u = k / 3.0
+                yy = y_belt * (1.0 - u) + y_hood_edge * u
+                zz = belt_x + (z_hood_edge - belt_x) * (u ** 0.72) + 0.010 * math.sin(math.pi * u)
+                profile.append((yy, zz))
+            # Загнутый внутрь фланец крепления крыла на брызговике
+            profile.append((y_hood_edge - 0.008, z_flange + 0.010))
+            profile.append((y_flange, z_flange))
+
+            row_out = []
+            row_in = []
+            for idx_p, (yy, zz) in enumerate(profile):
+                if idx_p < 7:
+                    n_off = Vector((0.0, -side * FENDER_THICKNESS, 0.0))
+                elif idx_p < 10:
+                    n_off = Vector((0.0, -side * FENDER_THICKNESS * 0.55, -FENDER_THICKNESS * 0.85))
+                else:
+                    n_off = Vector((0.0, 0.0, -FENDER_THICKNESS * 0.80))
+                p_o = Vector((x, side * yy, zz))
+                row_out.append(p_o)
+                row_in.append(p_o + n_off)
+            outer_pts.append(row_out)
+            inner_pts.append(row_in)
+        _add_thick_grid(bm_f, outer_pts, inner_pts)
+        f_ob = bmesh_to_object(f'Fender_Front_{label}', bm_f, material=mats['paint'],
+                               smooth=True, collection=collection)
+        uv_box(f_ob, scale=1.2)
+        _attach(f_ob)
+
+    # 7. ОТДЕЛЬНЫЙ передний бампер (Front_Bumper): носовой модуль + левое/правое боковые крылышки
+    bm_bmp = bmesh.new()
+    # 7a. Основной носовой модуль от FRONT_BUMPER_X до X_MAX (с точным 3D-куполом носа)
+    nx_b = 10
+    b_xs = [FRONT_BUMPER_X + (TIP_F - FRONT_BUMPER_X) * i / (nx_b - 1) for i in range(nx_b)]
+    b_loops = [body_section(x) for x in b_xs]
+    vc = len(b_loops[0])
+    b_verts = []
+    for x, loop in zip(b_xs, b_loops):
+        for (y, z) in loop:
+            b_verts.append(bm_bmp.verts.new(Vector((x, y, z))))
+    for i in range(nx_b - 1):
+        b0 = i * vc
+        b1 = (i + 1) * vc
+        for k in range(vc):
+            bm_bmp.faces.new((
+                b_verts[b0 + k],
+                b_verts[b0 + (k + 1) % vc],
+                b_verts[b1 + (k + 1) % vc],
+                b_verts[b1 + k],
+            ))
+    # Задняя стенка носового модуля бампера на FRONT_BUMPER_X (с зазором от «телевизора»)
+    zm_b0 = 0.5 * (ZB(FRONT_BUMPER_X) + ZR(FRONT_BUMPER_X))
+    back_c = bm_bmp.verts.new(Vector((FRONT_BUMPER_X + 0.015, 0.0, zm_b0)))
+    for k in range(vc):
+        kn = (k + 1) % vc
+        bm_bmp.faces.new((back_c, b_verts[k], b_verts[kn]))
+
+    # Передний 3D-купол бампера по суперэллипсу от TIP_F -> X_MAX
+    n_rings_b = 7
+    prev_b = [b_verts[(nx_b - 1) * vc + k] for k in range(vc)]
+    base_b = b_loops[-1]
+    zm_bf = 0.5 * (ZB(TIP_F) + ZR(TIP_F))
+    tip_bf = bm_bmp.verts.new(Vector((X_MAX, 0.0, zm_bf)))
+    for step in range(1, n_rings_b):
+        u = step / float(n_rings_b)
+        s = max(0.06, dome_scale(u))
+        xr = TIP_F + (X_MAX - TIP_F) * u
+        ring = [
+            bm_bmp.verts.new(Vector((xr, y * s, zm_bf + (z - zm_bf) * s)))
+            for (y, z) in base_b
+        ]
+        for k in range(vc):
+            kn = (k + 1) % vc
+            bm_bmp.faces.new((prev_b[k], prev_b[kn], ring[kn], ring[k]))
+        prev_b = ring
+    for k in range(vc):
+        kn = (k + 1) % vc
+        bm_bmp.faces.new((tip_bf, prev_b[kn], prev_b[k]))
+
+    # 7b. Левое и правое боковые крылышки бампера (плавно заходят в носовой модуль без ступеньки)
+    wing_xs = [
+        FRONT_BUMPER_WING_X + (FRONT_BUMPER_X + 0.030 - FRONT_BUMPER_WING_X) * i / 9.0
+        for i in range(10)
+    ]
+    for side in (1.0, -1.0):
+        w_out = []
+        w_in = []
+        for x in wing_xs:
+            # Нижняя кромка крылышка совпадает с линией порога и плавно подгибается к носу
+            t_w = clamp((x - FRONT_BUMPER_WING_X) / 0.32, 0.0, 1.0)
+            z_lo = ZB(x) + 0.034 + 0.018 * (t_w ** 1.5)
+            z_hi = fender_bumper_seam_z(min(x, FENDER_X_FRONT)) - 0.006
+            row_o = []
+            row_i = []
+            for j in range(6):
+                u = j / 5.0
+                zz = z_lo + (z_hi - z_lo) * u
+                # Мягкий подгиб нижней юбки бампера (без острой угловатой ступеньки)
+                chin_tuck = 1.0 - 0.055 * ((1.0 - u) ** 2.0)
+                yy = side_surface_y(x, zz) * chin_tuck
+                row_o.append(Vector((x, side * yy, zz)))
+                row_i.append(Vector((x, side * (yy - BUMPER_THICKNESS), zz)))
+            w_out.append(row_o)
+            w_in.append(row_i)
+        _add_thick_grid(bm_bmp, w_out, w_in)
+
+    # Нижняя соединительная «юбка» под краш-боксом между крылышками бампера
+    add_box(bm_bmp, FRONT_BUMPER_WING_X + 0.08, FRONT_BUMPER_X + 0.02, -0.54, 0.54, 0.205, 0.232)
+
+    bumper_ob = bmesh_to_object('Front_Bumper', bm_bmp, material=mats['paint'],
+                                smooth=True, collection=collection)
+    uv_box(bumper_ob, scale=1.2)
+    _attach(bumper_ob)
+
+    return bumper_ob, objs
 
 
 def _add_station_beam(bm, stations, side=1.0):
@@ -1783,69 +2050,158 @@ def build_trunk(body_ob, mats, collection):
 
 
 def build_hood(body_ob, mats, collection):
-    """Строит отделённый капот (Hood_Lid), агрегаты моторного отсека (Engine_Bay),
-    две петли капота и два телескопических газовых лифта с ацикличным TRACK_TO."""
+    """Строит отделённый капот (Hood_Lid с внутренней силовой рамой и скобой замка),
+    реалистичный моторный отсек поперечной компоновки Volvo Drive-E (Engine_Bay, Engine_Metal,
+    Coolant_Tank), петли капота и телескопические газовые лифты с ацикличным TRACK_TO."""
     objs = []
     hz = hood_hinge_z()
     hinge_origin = Vector((HOOD_HINGE_X, 0.0, hz))
 
-    # 1. Агрегаты моторного отсека внутри углублённой ниши (блок ДВС, ГБЦ, радиатор, чашки стоек)
+    def _attach_body(ob):
+        ob.parent = body_ob
+        ob.matrix_parent_inverse = body_ob.matrix_world.inverted()
+        objs.append(ob)
+        return ob
+
+    # 1a. Основные агрегаты моторного отсека (Engine_Bay — тёмный пластик, кожухи, патрубки)
     bm_eng = bmesh.new()
-    gap = 0.003
-    z_base = HOOD_BAY_Z + 0.045
-    # Основной блок двигателя и декоративная плита впускного коллектора
-    add_box(bm_eng, 1.24, 1.96, -0.26, 0.26, z_base, z_base + 0.24)
-    add_box(bm_eng, 1.28, 1.92, -0.22, 0.22, z_base + 0.24 + gap, z_base + 0.31)
-    # Левая и правая крышки ГБЦ / впускные каналы
-    for sgn in (-1.0, 1.0):
-        add_box(bm_eng, 1.28, 1.90, sgn * 0.28, sgn * 0.38, z_base + 0.08, z_base + 0.25)
-    # Передний радиатор и верхняя рамка телевизора
-    add_box(bm_eng, 2.08, 2.16, -0.44, 0.44, z_base, z_base + 0.30)
-    # Чашки передних амортизационных стоек (по оси AXLE_F = +1.60)
-    for sgn in (-1.0, 1.0):
-        _add_z_cylinder(bm_eng, 0.085, z_base, z_base + 0.28, seg=18,
-                        center_xy=(AXLE_F, sgn * 0.44))
-    # Аккумулятор / блок предохранителей у моторного щита
-    add_box(bm_eng, 1.12, 1.23, -0.42, -0.24, z_base, z_base + 0.22)
-    add_box(bm_eng, 1.12, 1.23, 0.24, 0.42, z_base, z_base + 0.20)
+    z_sub = 0.275
+    # Поперечный 4-цилиндровый блок ДВС (расположен правее оси Y, КПП — слева, как у Volvo S90)
+    add_box(bm_eng, 1.42, 1.84, -0.34, 0.08, z_sub, 0.635)
+    # Декоративная пластиковая плита Volvo Drive-E с 4 продольными рёбрами жёсткости
+    add_box(bm_eng, 1.44, 1.81, -0.32, 0.06, 0.642, 0.695)
+    for k_rib in range(4):
+        ry = -0.26 + k_rib * 0.095
+        add_box(bm_eng, 1.46, 1.79, ry - 0.022, ry + 0.022, 0.698, 0.715)
+    # Маслозаливная горловина на передней части крышки двигателя
+    _add_z_cylinder(bm_eng, 0.028, 0.696, 0.732, seg=14, center_xy=(1.74, -0.24))
+
+    # Основной радиатор + кожух электровентилятора сразу за «телевизором»
+    add_box(bm_eng, 2.02, 2.11, -0.45, 0.45, 0.295, 0.715)
+    # Верхний и нижний резиновые патрубки ОЖ (радиатор <-> двигатель)
+    add_box(bm_eng, 1.82, 2.018, -0.30, -0.24, 0.61, 0.655)
+    add_box(bm_eng, 1.82, 2.018, 0.00, 0.05, 0.34, 0.385)
+
+    # Корпус воздушного фильтра (Airbox, слева +Y) + холодный впуск к «телевизору» и гофра к ДВС
+    add_box(bm_eng, 1.66, 1.98, 0.25, 0.45, 0.44, 0.675)
+    add_box(bm_eng, 1.982, 2.13, 0.30, 0.42, 0.60, 0.665)  # заборник холодного воздуха
+    add_box(bm_eng, 1.56, 1.66, 0.09, 0.32, 0.59, 0.655)   # гофра впуска от фильтра к ДВС
+
+    # Короб АКБ и блок предохранителей у моторного щита (слева +Y)
+    add_box(bm_eng, 1.18, 1.42, 0.27, 0.47, 0.39, 0.665)
+    add_box(bm_eng, 1.44, 1.62, 0.32, 0.47, 0.44, 0.635)   # блок реле и предохранителей
+
+    # Бачок омывателя стекла у правого брызговика (-Y) с заливной горловиной
+    add_box(bm_eng, 1.78, 1.98, -0.47, -0.35, 0.36, 0.635)
+    _add_z_cylinder(bm_eng, 0.022, 0.636, 0.685, seg=12, center_xy=(1.90, -0.41))
+
     engine_bay = bmesh_to_object('Engine_Bay', bm_eng, material=mats['carbon'],
                                  smooth=True, collection=collection)
     uv_box(engine_bay, scale=2.5)
-    engine_bay.parent = body_ob
-    engine_bay.matrix_parent_inverse = body_ob.matrix_world.inverted()
-    objs.append(engine_bay)
+    _attach_body(engine_bay)
+
+    # 1b. Металлические узлы моторного отсека (Engine_Metal — алюминий: КПП, коллектор, опоры)
+    bm_em = bmesh.new()
+    # Корпус поперечной 8-ступенчатой КПП (слева от блока ДВС)
+    add_box(bm_em, 1.46, 1.78, 0.085, 0.295, 0.31, 0.575)
+    # Алюминиевый впускной ресивер и 4 патрубка перед блоком цилиндров
+    add_box(bm_em, 1.845, 1.94, -0.28, 0.04, 0.54, 0.63)
+    for k_run in range(4):
+        ry = -0.24 + k_run * 0.082
+        add_box(bm_em, 1.81, 1.843, ry - 0.018, ry + 0.018, 0.57, 0.625)
+    # Теплозащитный экран турбины/выпуска у моторного щита
+    add_box(bm_em, 1.24, 1.39, -0.28, 0.04, 0.44, 0.635)
+    # Верхние опорные фланцы передних амортизационных стоек (с центральной гайкой)
+    for side in (1.0, -1.0):
+        _add_z_cylinder(bm_em, 0.072, 0.792, 0.816, seg=18, center_xy=(AXLE_F, side * 0.54))
+        _add_z_cylinder(bm_em, 0.018, 0.817, 0.834, seg=12, center_xy=(AXLE_F, side * 0.54))
+    # Алюминиевая поперечная распорка чашек стоек (перед жабо)
+    add_box(bm_em, 1.28, 1.32, -0.50, 0.50, 0.745, 0.772)
+    em_ob = bmesh_to_object('Engine_Metal', bm_em, material=mats['alloy'],
+                            smooth=True, collection=collection)
+    uv_box(em_ob, scale=3.5)
+    _attach_body(em_ob)
+
+    # 1c. Полупрозрачный/светлый расширительный бачок ОЖ (Coolant_Tank — правый брызговик)
+    bm_ct = bmesh.new()
+    add_box(bm_ct, 1.26, 1.46, -0.47, -0.33, 0.55, 0.675)
+    _add_z_cylinder(bm_ct, 0.026, 0.676, 0.708, seg=14, center_xy=(1.36, -0.40))
+    ct_ob = bmesh_to_object('Coolant_Tank', bm_ct, material=mats['white'],
+                            smooth=True, collection=collection)
+    uv_box(ct_ob, scale=6.0)
+    _attach_body(ct_ob)
 
     # 2. Отделённая крышка капота (origin в оси задней петли, вращается вокруг -Y)
+    # Чёткие 6-мм зазоры до жабо (HOOD_X_REAR+0.006), крыльев (WR+0.044) и бампера (FRONT_BUMPER_X)
     bm_hood = bmesh.new()
     nx = 18
     ny = 11
-    x_start = HOOD_X_REAR + 0.004
-    x_end = HOOD_X_FRONT + 0.035
+    x_start = HOOD_X_REAR + 0.006
+    x_end = FRONT_BUMPER_X - 0.006
     xs = [x_start + (x_end - x_start) * i / (nx - 1) for i in range(nx)]
 
     outer_pts = []
     inner_pts = []
     for x in xs:
-        hw = WR(x) + 0.042
+        hw = WR(x) + 0.044
         row_out = []
         row_in = []
         for j in range(ny):
             v = -1.0 + 2.0 * j / (ny - 1)
             y = v * hw
-            edge_drop = 0.022 * (abs(v) ** 3.0)
+            edge_drop = 0.018 * (abs(v) ** 3.0)
             z_top = hood_deck_z(x, y) - edge_drop + 0.002
             row_out.append(Vector((x - HOOD_HINGE_X, y, z_top - hz)))
             row_in.append(Vector((x - HOOD_HINGE_X, y, z_top - HOOD_LID_THICKNESS - hz)))
         outer_pts.append(row_out)
         inner_pts.append(row_in)
     _add_thick_grid(bm_hood, outer_pts, inner_pts)
+
+    # Внутренняя усиливающая силовая рама капота (рёбра жёсткости + скоба замка на изнанке)
+    def _hood_inner_bar(x0, y0, x1, y1, half_w=0.022, depth=0.018):
+        p0 = Vector((x0 - HOOD_HINGE_X, y0,
+                     hood_deck_z(x0, y0) - HOOD_LID_THICKNESS - 0.006 - hz))
+        p1 = Vector((x1 - HOOD_HINGE_X, y1,
+                     hood_deck_z(x1, y1) - HOOD_LID_THICKNESS - 0.006 - hz))
+        d = (p1 - p0)
+        if d.length < 1e-4:
+            return
+        d_xy = Vector((d.x, d.y, 0.0)).normalized()
+        perp = Vector((-d_xy.y, d_xy.x, 0.0)) * half_w
+        up = Vector((0.0, 0.0, 1.0))
+        r0 = [
+            bm_hood.verts.new(p0 - perp),
+            bm_hood.verts.new(p0 + perp),
+            bm_hood.verts.new(p0 + perp - up * depth),
+            bm_hood.verts.new(p0 - perp - up * depth),
+        ]
+        r1 = [
+            bm_hood.verts.new(p1 - perp),
+            bm_hood.verts.new(p1 + perp),
+            bm_hood.verts.new(p1 + perp - up * depth),
+            bm_hood.verts.new(p1 - perp - up * depth),
+        ]
+        for k in range(4):
+            kn = (k + 1) % 4
+            bm_hood.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
+        bm_hood.faces.new((r0[0], r0[3], r0[2], r0[1]))
+        bm_hood.faces.new((r1[0], r1[1], r1[2], r1[3]))
+
+    # Периметральные и диагональные рёбра жёсткости на внутренней стороне капота
+    _hood_inner_bar(1.12, -0.48, 2.16, -0.42)
+    _hood_inner_bar(1.12, +0.48, 2.16, +0.42)
+    _hood_inner_bar(1.12, -0.45, 1.12, +0.45)
+    _hood_inner_bar(2.16, -0.39, 2.16, +0.39)
+    _hood_inner_bar(1.16, -0.42, 2.12, +0.36, half_w=0.016, depth=0.014)
+    _hood_inner_bar(1.16, +0.42, 2.12, -0.36, half_w=0.016, depth=0.014)
+    # Центральная ответная скоба замка капота (входит в замок на Radiator_Support)
+    _hood_inner_bar(2.16, -0.025, 2.22, +0.025, half_w=0.008, depth=0.030)
+
     hood_lid = bmesh_to_object('Hood_Lid', bm_hood, material=mats['paint'],
                                smooth=True, collection=collection)
     uv_box(hood_lid, scale=1.0)
     hood_lid.location = hinge_origin
-    hood_lid.parent = body_ob
-    hood_lid.matrix_parent_inverse = body_ob.matrix_world.inverted()
-    objs.append(hood_lid)
+    _attach_body(hood_lid)
 
     # 3. Петли капота и телескопические газовые упоры (слева и справа)
     bx, bz = HOOD_LIFT_BODY_XZ
@@ -2288,7 +2644,7 @@ def build_lighting(mats, studio_col):
               rot=(0.0, 0.0, 0.0), collection=studio_col)
     add_light('Int_TrunkLight', (-1.78, 0.0, 1.02), 3.2, size=0.32,
               rot=(0.0, 0.0, 0.0), collection=studio_col)
-    add_light('Int_EngineLight', (1.65, 0.0, 1.10), 4.0, size=0.36,
+    add_light('Int_EngineLight', (1.65, 0.0, 1.12), 6.5, size=0.45,
               rot=(0.0, 0.0, 0.0), collection=studio_col)
 
     # Студийный свет: 6 Area-ламп вокруг машины, каждая нацелена на TARGET
@@ -2473,6 +2829,8 @@ def main(argv=None):
 
     mats = make_materials()
     body_ob = build_body(mats, car_col)
+    # Отделённая передняя часть: силовой каркас, отсек капота, отдельные крылья и передний бампер
+    front_bumper, _front_objs = build_front_structure_and_panels(body_ob, mats, car_col)
     bpy.context.view_layer.update()
     _roof_ob, _pillar_objs = build_roof_and_pillars(body_ob, mats, car_col)
     glass_ob = build_glass(mats, car_col)
@@ -2502,7 +2860,7 @@ def main(argv=None):
     # Отделённый багажник: крышка, коврик ниши, петли («гусиная шея») и газовые лифты
     trunk_lid, _trunk_objs = build_trunk(body_ob, mats, car_col)
 
-    # Отделённый капот: крышка, моторный отсек, петли и газовые лифты
+    # Отделённый капот: крышка с силовой рамой, моторный отсек, петли и газовые лифты
     hood_lid, _hood_objs = build_hood(body_ob, mats, car_col)
 
     interior_objs = build_interior(mats, car_col, door_objs=door_objs)
@@ -2510,10 +2868,20 @@ def main(argv=None):
     cams = build_cameras(studio_col)
     bpy.context.scene.camera = cams['Cam_Exterior']
 
-    # Привязка деталей, салона и колёс к кузову (крен кузова двигает всю машину целиком)
+    # Привязка деталей: решётка и воздухозаборник -> Front_Bumper, передние арки -> Fender_Front_L/R
+    fender_l = bpy.data.objects.get('Fender_Front_L')
+    fender_r = bpy.data.objects.get('Fender_Front_R')
+    parent_map = {
+        'Grille_Front': front_bumper,
+        'Grille_Chrome': front_bumper,
+        'Bumper_Intake_Front': front_bumper,
+        'Wheel_Arch_FL': fender_l or body_ob,
+        'Wheel_Arch_FR': fender_r or body_ob,
+    }
     for ob in wheels + detail_objs + interior_objs:
-        ob.parent = body_ob
-        ob.matrix_parent_inverse = body_ob.matrix_world.inverted()
+        parent = parent_map.get(ob.name, body_ob)
+        ob.parent = parent
+        ob.matrix_parent_inverse = parent.matrix_world.inverted()
 
     steering = bpy.data.objects.get('SteeringWheel')
     animate(wheels, steering, body_ob, door_objs, trunk_lid=trunk_lid, hood_lid=hood_lid)

@@ -101,6 +101,18 @@ HOOD_LIFT_LID_ANCHOR_X = 1.66     # верхнее крепление лифта
 HOOD_LIFT_CYL_LEN = 0.490         # длина корпуса цилиндра лифта капота, м
 HOOD_LIFT_ROD_LEN = 0.480         # длина хромированного штока лифта капота, м
 
+# --------------------------------------------------------------------------- #
+# 1д. Разделение передней части: моторный щит Body, отдельные крылья и бампер
+# --------------------------------------------------------------------------- #
+FRONT_CLIP_X = 0.95           # передняя стенка монокока Body (моторный щит / стойка A)
+FENDER_X_REAR = 0.928         # задняя кромка переднего крыла (зазор 6 мм к передней двери)
+FENDER_X_FRONT = 2.285        # передняя кромка крыла у фары/бампера
+FRONT_BUMPER_X = 2.295        # линия стыка капота и крыльев с передним бампером
+FRONT_BUMPER_WING_X = 1.995   # передний край колёсной арки, до которого доходит крылышко бампера
+FRONT_ARCH_CUT_R = WHEEL_R + 0.036  # радиус реального выреза колёсной арки в переднем крыле
+FENDER_THICKNESS = 0.016      # толщина штампованной панели переднего крыла, м
+BUMPER_THICKNESS = 0.020      # толщина оболочки переднего бампера, м
+
 
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
@@ -327,6 +339,30 @@ def hood_lift_endpoints(open_deg):
     wz = hz - lx * math.sin(rad) + lz * math.cos(rad)
     dist = math.hypot(wx - bx, wz - bz)
     return (bx, bz), (wx, wz), dist
+
+
+def fender_bumper_seam_z(x):
+    """Высота наклонного стыка переднего крыла с передним бампером на участке
+    [FRONT_BUMPER_WING_X .. FENDER_X_FRONT]: от передней кромки арки вверх к фаре."""
+    u = clamp((x - FRONT_BUMPER_WING_X) / max(FENDER_X_FRONT - FRONT_BUMPER_WING_X, 0.05),
+              0.0, 1.0)
+    return 0.50 + 0.21 * (u ** 0.85)
+
+
+def fender_bottom_z(x):
+    """Нижняя кромка отдельного переднего крыла с учётом реального выреза колёсной арки
+    вокруг (AXLE_F, WHEEL_Z) и диагонального стыка с передним бампером."""
+    # Совпадает по высоте с линией порога под передней дверью (без ступеньки снизу)
+    z_sill = ZB(x) + 0.032
+    dx = abs(x - AXLE_F)
+    if dx < FRONT_ARCH_CUT_R - 1e-4:
+        z_arch = WHEEL_Z + math.sqrt(max(0.0, FRONT_ARCH_CUT_R * FRONT_ARCH_CUT_R - dx * dx))
+        z_lo = max(z_sill, z_arch)
+    else:
+        z_lo = z_sill
+    if x >= FRONT_BUMPER_WING_X:
+        z_lo = max(z_lo, fender_bumper_seam_z(x))
+    return min(z_lo, BELT(x) - 0.05)
 
 
 def trunk_bay_mask(x, transition=0.04):
