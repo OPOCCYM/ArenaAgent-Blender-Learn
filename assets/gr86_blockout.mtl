@@ -1,0 +1,41 @@
+newmtl Pearl_White
+Kd 0.82 0.84 0.87
+Ka 0.02 0.02 0.02
+Ks 0.550 0.550 0.550
+Ns 760
+
+newmtl Glass_Dark
+Kd 0.055 0.105 0.135
+Ka 0.02 0.02 0.02
+Ks 0.420 0.420 0.420
+Ns 830
+
+newmtl Tire_Rubber
+Kd 0.018 0.02 0.023
+Ka 0.02 0.02 0.02
+Ks 0.000 0.000 0.000
+Ns 160
+
+newmtl Graphite_Alloy
+Kd 0.68 0.7 0.73
+Ka 0.02 0.02 0.02
+Ks 0.820 0.820 0.820
+Ns 760
+
+newmtl Brake_Metal
+Kd 0.24 0.24 0.23
+Ka 0.02 0.02 0.02
+Ks 0.650 0.650 0.650
+Ns 620
+
+newmtl Lamp_White
+Kd 0.94 0.97 1.0
+Ka 0.02 0.02 0.02
+Ks 0.100 0.100 0.100
+Ns 850
+
+newmtl Lamp_Red
+Kd 0.6 0.015 0.012
+Ka 0.02 0.02 0.02
+Ks 0.100 0.100 0.100
+Ns 800
