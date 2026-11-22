@@ -161,14 +161,19 @@ def build_parametric_shell():
             # Split side skin into independently selectable panel objects. Keep seams on
             # existing loft section boundaries and the door-gap locations.
             side=1 if j<n_half else -1
-            if lo>=3 and hi<=10:
+            if lo>=2 and hi<=11:
                 if -1.90<xm<-.75: part=f'Front_Fender_{"L" if side>0 else "R"}'
                 elif -.75<xm<.75: part=f'Door_{"L" if side>0 else "R"}'
                 elif .75<xm<1.90: part=f'Rear_Quarter_{"L" if side>0 else "R"}'
-            # Upper longitudinal skin is divided into bonnet and deck-lid panels.
+            # Hood and trunk are separate crown/upper-side skins; the aperture ends
+            # align to the front cowl and rear deck break.
             if lo>=10 and hi<=15:
                 if xm<-.97: part='Hood_Panel'
                 elif xm>1.00: part='Trunk_Lid'
+            # Roof is a discrete shell, leaving its perimeter adjacent to the A/C
+            # pillars; pillars bridge it to the beltline around the glazing.
+            if lo>=15 and hi<=18 and -.56<xm<.53:
+                part='Roof_Panel'
             face_parts.append(part)
     faces.append(tuple(reversed(range(n_ring)))); face_mats.append(0); face_parts.append('Body_Shell')
     last=(len(sections)-1)*n_ring
@@ -191,8 +196,14 @@ def build_parametric_shell():
             poly.material_index=0 if face_mats[source_id]==1 else face_mats[source_id]
             poly.use_smooth=True
         ob=bpy.data.objects.new(part,mesh); bpy.data.collections['GR86_Model'].objects.link(ob)
-        ob['component_type']='separate exterior panel' if part!='Body_Shell' else 'main body shell'
-        ob['construction']='Split from dense longitudinal loft; shared section seams, independent mesh object'
+        ob['component_type']='main body shell' if part=='Body_Shell' else 'separate exterior panel'
+        ob['construction']='Split from dense longitudinal loft; independent mesh object'
+        if part in {'Hood_Panel','Trunk_Lid','Roof_Panel'} or part.startswith(('Door_','Front_Fender_','Rear_Quarter_')):
+            solid=ob.modifiers.new('Panel return / sheet thickness','SOLIDIFY')
+            solid.thickness=.008 if part.startswith('Door_') else .010
+            solid.offset=-.25
+            edge=ob.modifiers.new('Pressed panel edge','BEVEL')
+            edge.width=.0025; edge.segments=2
         if part=='Body_Shell': shell=ob
     shell['reference_status']='Proportional draft; verify against GR86 orthographic references'
     # Side glazing: subdivided curved patches fitted to the loft's shoulder and roof
@@ -343,6 +354,21 @@ def main():
     build_interior(vehicle)
     imported=[obj for obj in vehicle.objects]
     rig=bpy.data.collections.new('GR86_Rig'); scene.collection.children.link(rig)
+    # Independent transform roots let animators swing panels about plausible hinge axes.
+    for panel,root_name,loc in (
+        ('Hood_Panel','Hinge_Hood',(-.96,0,.98)),
+        ('Trunk_Lid','Hinge_Trunk',(1.02,0,.94)),
+        ('Door_L','Hinge_Door_L',(-.75,.82,.76)),
+        ('Door_R','Hinge_Door_R',(-.75,-.82,.76)),
+    ):
+        root=bpy.data.objects.new(root_name,None); rig.objects.link(root)
+        root.empty_display_type='CIRCLE'; root.empty_display_size=.10; root.location=loc
+        bpy.context.view_layer.update()
+        panel_obj=bpy.data.objects.get(panel)
+        if panel_obj:
+            panel_obj.parent=root
+            panel_obj.matrix_parent_inverse=root.matrix_world.inverted()
+            bpy.context.view_layer.update()
     wheel_roots={}
     for axle,x in [('Front',-1.2875),('Rear',1.2875)]:
         for side in (-1,1):
