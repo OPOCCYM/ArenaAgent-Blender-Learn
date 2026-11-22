@@ -1155,7 +1155,7 @@ def build_front_structure_and_panels(body_ob, mats, collection):
     # чётким 7-мм швом от крыльев и капота, вырезами под фары и крепёжными кронштейнами!
     bm_bmp = bmesh.new()
     u_front = []
-    y_fcorner = side_surface_y(FENDER_X_FRONT, 0.55) * 0.968
+    y_fcorner = side_surface_y(FENDER_X_FRONT, 0.55) * 0.976
     r_fcorn = 0.145  # плавный автомобильный радиус скругления передних углов в плане XY
     x_fwing_end = FENDER_X_FRONT - r_fcorn
     y_fspan = y_fcorner - r_fcorn
@@ -1171,7 +1171,7 @@ def build_front_structure_and_panels(body_ob, mats, collection):
         return 0.726 * (1.0 - t_in) + 0.548 * t_in
 
     # 7a. Правое крылышко (-Y): от переднего края арки вперёд к правому углу
-    n_fw = 6
+    n_fw = 8
     for i in range(n_fw):
         t = i / float(n_fw)
         x = FRONT_BUMPER_WING_X + (x_fwing_end - FRONT_BUMPER_WING_X) * t
@@ -1229,16 +1229,17 @@ def build_front_structure_and_panels(body_ob, mats, collection):
         row_o = []
         row_i = []
         side_s = 1.0 if yy >= 0.0 else -1.0
+        w_blend = front_w * front_w * (3.0 - 2.0 * front_w)
         for j in range(nz_fb):
             u = j / float(nz_fb - 1)
             zz = z_lo + (z_hi - z_lo) * u
             # На боковых крылышках (front_w < 1) вычисляем точную side_surface_y(xx, zz)
-            # на каждой высоте zz -> перепад крыло <-> бампер на шве < 0.5 мм (без ступеньки!)
+            # на каждой высоте zz + компенсация subsurf-стяжки -> шов крыло <-> бампер ~1-2 мм!
             if front_w < 0.99:
                 y_true = side_s * side_surface_y(xx, zz)
-                t_fc = clamp((xx - 2.12) / max(FENDER_X_FRONT - 2.12, 0.05), 0.0, 1.0)
-                y_true *= (1.0 - 0.034 * (t_fc ** 2.0))
-                y_loc = y_true * (1.0 - front_w) + yy * front_w
+                t_fc = clamp((xx - 2.08) / max(FENDER_X_FRONT - 2.08, 0.05), 0.0, 1.0)
+                y_true *= (1.0 - 0.024 * (t_fc ** 2.0))
+                y_loc = y_true * (1.0 - w_blend) + yy * w_blend
             else:
                 y_loc = yy
             # Автомобильная вертикальная пластика бампера:
@@ -1254,9 +1255,11 @@ def build_front_structure_and_panels(body_ob, mats, collection):
                 if 0.42 < u < 0.88 else 0.0
             )
             top_slope = -0.024 * (max(0.0, (u - 0.72) / 0.28) ** 1.7)
-            # Боковой подгиб только внизу (u -> 0), на верхнем шве u=1 строго 0 мм!
-            side_tuck = -0.012 * ((1.0 - u) ** 2.4) * (1.0 - front_w)
-            sculpt = (lip + intake_cove + belt_bulge + top_slope) * front_w + side_tuck
+            # Боковой подгиб внизу + компенсация Catmull-Clark стяжки у верхнего шва крылышка
+            side_tuck = (
+                (-0.012 * ((1.0 - u) ** 2.4) + 0.008 * (u ** 1.5)) * (1.0 - w_blend)
+            )
+            sculpt = (lip + intake_cove + belt_bulge + top_slope) * w_blend + side_tuck
             p_o = Vector((xx, y_loc, zz)) + n_dir * sculpt
             p_i = p_o - n_dir * BUMPER_THICKNESS
             row_o.append(p_o)
@@ -1620,21 +1623,23 @@ def build_rear_structure_and_panels(body_ob, mats, collection):
         rb_in.append(row_i)
     _add_thick_grid(bm_rb, rb_out, rb_in)
 
-    # Горизонтальная погрузочная полка поверху заднего бампера (уходит под проём багажника)
+    # Горизонтальная погрузочная полка поверху заднего бампера (строго внутри задней панели
+    # до скругления углов y_span -> без выступающего «зубчика» под углом заднего фонаря!)
     sh_out = []
     sh_in = []
+    y_shelf = y_span - 0.018
     for i in range(13):
         v = -1.0 + 2.0 * i / 12.0
-        yy = v * (y_corner - 0.055)
-        x_back = rear_tail_surface_x(yy) - 0.018
+        yy = v * y_shelf
+        x_back = rear_tail_surface_x(yy) - 0.012
         x_front = -2.26
         row_so = []
         row_si = []
         for j in range(4):
             u = j / 3.0
             xx = x_back * (1.0 - u) + x_front * u
-            row_so.append(Vector((xx, yy, REAR_BUMPER_TOP_Z)))
-            row_si.append(Vector((xx, yy, REAR_BUMPER_TOP_Z - BUMPER_THICKNESS)))
+            row_so.append(Vector((xx, yy, REAR_BUMPER_TOP_Z - 0.002)))
+            row_si.append(Vector((xx, yy, REAR_BUMPER_TOP_Z - 0.002 - BUMPER_THICKNESS)))
         sh_out.append(row_so)
         sh_in.append(row_si)
     _add_thick_grid(bm_rb, sh_out, sh_in)
@@ -1860,6 +1865,75 @@ def build_roof_and_pillars(body_ob, mats, collection):
         pc.parent = body_ob
         pc.matrix_parent_inverse = body_ob.matrix_world.inverted()
         objs.append(pc)
+
+        # 5. Фирменный хромированный DLO-молдинг Volvo S90 Inscription:
+        # верхняя дуга вдоль Pillar_A -> Roof -> Pillar_C + окантовка задней треугольной форточки
+        # (поясные планки на дверях крепятся к самим дверям и открываются вместе с ними!)
+        bm_wt = bmesh.new()
+
+        def _add_chrome_strip(pts_3d, hw=0.0065, hd=0.0045):
+            rings = []
+            n_p = len(pts_3d)
+            for idx, p in enumerate(pts_3d):
+                if idx == 0:
+                    tang = (pts_3d[1] - pts_3d[0]).normalized()
+                elif idx == n_p - 1:
+                    tang = (pts_3d[-1] - pts_3d[-2]).normalized()
+                else:
+                    tang = (pts_3d[idx + 1] - pts_3d[idx - 1]).normalized()
+                y_dir = Vector((0.0, side, 0.0))
+                in_p = tang.cross(y_dir)
+                if in_p.length < 1e-6:
+                    in_p = Vector((0.0, 0.0, 1.0))
+                in_p.normalize()
+                rings.append([
+                    bm_wt.verts.new(p - in_p * hw - y_dir * hd),
+                    bm_wt.verts.new(p + in_p * hw - y_dir * hd),
+                    bm_wt.verts.new(p + in_p * hw + y_dir * hd),
+                    bm_wt.verts.new(p - in_p * hw + y_dir * hd),
+                ])
+            for i_s in range(n_p - 1):
+                r0, r1 = rings[i_s], rings[i_s + 1]
+                for k in range(4):
+                    kn = (k + 1) % 4
+                    bm_wt.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
+            bm_wt.faces.new((rings[0][0], rings[0][3], rings[0][2], rings[0][1]))
+            bm_wt.faces.new((rings[-1][0], rings[-1][1], rings[-1][2], rings[-1][3]))
+
+        def _dlo_pt(x_v, t_v, y_off=0.006, z_off=0.0):
+            ya, zv = upper_side_yz(x_v, t_v)
+            return Vector((x_v, side * (ya + y_off), zv + z_off))
+
+        # Непрерывная хромированная дуга: вдоль задней кромки Pillar_A -> верх крыши ->
+        # спуск по Pillar_C -> поворот и подоконник задней форточки до заднего стыка Door_Rear
+        dlo_pts = []
+        xa_b, xa_t = WINDSHIELD_X_BOT - 0.082, ROOF_X_FRONT - 0.030
+        for k in range(6):
+            t = 0.02 + 0.96 * (k / 5.0)
+            dlo_pts.append(_dlo_pt(xa_b * (1.0 - t) + xa_t * t, t, y_off=0.005))
+        for k in range(1, 7):
+            u = k / 6.0
+            xx = xa_t * (1.0 - u) + (ROOF_X_REAR + 0.02) * u
+            dlo_pts.append(_dlo_pt(xx, 0.985, y_off=0.005))
+        xc_t, xc_b = ROOF_X_REAR + 0.02, REAR_GLASS_X_BOT + 0.34
+        for k in range(1, 6):
+            t = 0.985 - 0.955 * (k / 5.0)
+            dlo_pts.append(_dlo_pt(xc_t * t + xc_b * (1.0 - t), t, y_off=0.005))
+        # Нижний поясной отрезок задней форточки от угла C-стойки до стыка задней двери
+        xq_f = CABIN_CUT_X_REAR - 0.006
+        for k in range(1, 5):
+            u = k / 4.0
+            xx = xc_b * (1.0 - u) + xq_f * u
+            dlo_pts.append(_dlo_pt(xx, 0.03, y_off=0.006))
+        _add_chrome_strip(dlo_pts, hw=0.0065, hd=0.0045)
+
+        wt_ob = bmesh_to_object(f'Window_Trim_{label}', bm_wt, material=mats['chrome'],
+                                smooth=True, collection=collection, auto_smooth_deg=55.0,
+                                bevel=0.0015, bevel_segs=1)
+        uv_box(wt_ob, scale=8.0)
+        wt_ob.parent = body_ob
+        wt_ob.matrix_parent_inverse = body_ob.matrix_world.inverted()
+        objs.append(wt_ob)
 
     return roof_ob, objs
 
@@ -2379,10 +2453,35 @@ def build_doors(body_ob, mats, collection):
         b_seg = (9, 15) if is_front else (0, 6)
         _add_sash_bar(arch_pts, b_pillar_seg_range=b_seg)
 
+        # 2b. Нижний поясной хромированный молдинг двери (slot 2 = Chrome, открывается с дверью!)
+        belt_strip_o = []
+        belt_strip_i = []
+        n_bs = 10
+        n_before_chrome = len(bm.faces)
+        for ii in range(n_bs):
+            u_b = ii / float(n_bs - 1)
+            xb_s = (x_f - 0.004) * (1.0 - u_b) + (x_b + 0.004) * u_b
+            zb_s = BELT(xb_s)
+            yb_s = side * (side_surface_y(xb_s, zb_s) + 0.0055) - hinge_y
+            yb_in = side * (side_surface_y(xb_s, zb_s) - 0.004) - hinge_y
+            belt_strip_o.append([
+                Vector((xb_s - hx, yb_s, zb_s - 0.005 - hinge_z)),
+                Vector((xb_s - hx, yb_s, zb_s + 0.008 - hinge_z)),
+            ])
+            belt_strip_i.append([
+                Vector((xb_s - hx, yb_in, zb_s - 0.005 - hinge_z)),
+                Vector((xb_s - hx, yb_in, zb_s + 0.008 - hinge_z)),
+            ])
+        _add_thick_grid(bm, belt_strip_o, belt_strip_i)
+        bm.faces.ensure_lookup_table()
+        for f_idx in range(n_before_chrome, len(bm.faces)):
+            bm.faces[f_idx].material_index = 2
+
         door_ob = bmesh_to_object(name, bm, material=mats['paint'],
                                   smooth=True, collection=collection, auto_smooth_deg=55.0,
                                   bevel=0.0028, bevel_segs=2, subsurf=1)
         door_ob.data.materials.append(mats['piano_black'])
+        door_ob.data.materials.append(mats['chrome'])
         uv_box(door_ob, scale=1.5)
         door_ob.location = origin
         door_ob.parent = body_ob
@@ -2463,7 +2562,9 @@ def build_doors(body_ob, mats, collection):
         hdl_ob.parent = door_ob
         hdl_ob.location = Vector((0.0, 0.0, 0.0))
 
-        # 6. Обтекаемое каплевидное зеркало заднего вида (устанавливается на передние двери)
+        # 6. Обтекаемое двухцветное зеркало заднего вида Volvo S90 (на передней двери):
+        # слот 0 = Paint (верхняя крышка), слот 1 = Piano_Black (ножка + нижняя чаша),
+        # слот 2 = Chrome (зеркальное полотно сзади), слот 3 = DRL (LED-повторитель поворотника)
         if is_front:
             m_tag = 'L' if side > 0 else 'R'
             xm_w = hx - 0.16
@@ -2473,50 +2574,96 @@ def build_doors(body_ob, mats, collection):
             ym_l = ym_w - hinge_y
             zm_l = zm_w - hinge_z
             bm_mir = bmesh.new()
-            # Скошенная аэродинамическая ножка на двери (как у Volvo S90 — на полотне двери)
+
+            # 6a. Чёрная глянцевая ножка-флажок на полотне двери (slot 1 = Piano_Black)
             stalk_pts = [
-                Vector((xm_l, ym_l - side * 0.005, zm_l)),
-                Vector((xm_l - 0.015, ym_l + side * 0.032, zm_l + 0.028)),
-                Vector((xm_l - 0.028, ym_l + side * 0.055, zm_l + 0.052)),
+                Vector((xm_l, ym_l - side * 0.006, zm_l)),
+                Vector((xm_l - 0.016, ym_l + side * 0.034, zm_l + 0.026)),
+                Vector((xm_l - 0.030, ym_l + side * 0.058, zm_l + 0.050)),
             ]
-            _sweep_rect_tube(bm_mir, stalk_pts, half_y=0.014, half_n=0.014)
-            # Каплевидный корпус зеркала (5 сечений вдоль Y от ножки к наружному кончику)
+            _sweep_rect_tube(bm_mir, stalk_pts, half_y=0.014, half_n=0.013)
+            # Основание-треугольник ножки на двери
+            add_box(bm_mir, xm_l - 0.032, xm_l + 0.026,
+                    ym_l - side * 0.004, ym_l + side * 0.010, zm_l - 0.014, zm_l + 0.014)
+            bm_mir.faces.ensure_lookup_table()
+            for f_st in bm_mir.faces:
+                f_st.material_index = 1
+
+            # 6b. Скульптурный каплевидный корпус (верх = Paint [0], низ = Piano_Black [1])
+            n_before_cap = len(bm_mir.faces)
             m_rings = []
             m_specs = [
-                (0.048, -0.040, +0.048, +0.028, +0.088),
-                (0.080, -0.055, +0.052, +0.022, +0.098),
-                (0.120, -0.052, +0.038, +0.026, +0.094),
-                (0.155, -0.042, +0.015, +0.034, +0.084),
-                (0.172, -0.028, -0.005, +0.044, +0.072),
+                (0.048, -0.044, +0.050, +0.028, +0.092),
+                (0.085, -0.058, +0.054, +0.022, +0.104),
+                (0.130, -0.056, +0.042, +0.026, +0.100),
+                (0.172, -0.046, +0.018, +0.034, +0.088),
+                (0.194, -0.032, -0.004, +0.044, +0.074),
             ]
             for dy_off, dx0, dx1, dz0, dz1 in m_specs:
                 yy = ym_l + side * dy_off
+                dz_mid = 0.5 * (dz0 + dz1) - 0.006
                 if side > 0:
                     ring = [
                         bm_mir.verts.new(Vector((xm_l + dx0, yy, zm_l + dz0))),
                         bm_mir.verts.new(Vector((xm_l + dx1, yy, zm_l + dz0))),
+                        bm_mir.verts.new(Vector((xm_l + dx1 + 0.006, yy, zm_l + dz_mid))),
                         bm_mir.verts.new(Vector((xm_l + dx1, yy, zm_l + dz1))),
                         bm_mir.verts.new(Vector((xm_l + dx0, yy, zm_l + dz1))),
+                        bm_mir.verts.new(Vector((xm_l + dx0 - 0.003, yy, zm_l + dz_mid))),
                     ]
                 else:
                     ring = [
                         bm_mir.verts.new(Vector((xm_l + dx0, yy, zm_l + dz0))),
+                        bm_mir.verts.new(Vector((xm_l + dx0 - 0.003, yy, zm_l + dz_mid))),
                         bm_mir.verts.new(Vector((xm_l + dx0, yy, zm_l + dz1))),
                         bm_mir.verts.new(Vector((xm_l + dx1, yy, zm_l + dz1))),
+                        bm_mir.verts.new(Vector((xm_l + dx1 + 0.006, yy, zm_l + dz_mid))),
                         bm_mir.verts.new(Vector((xm_l + dx1, yy, zm_l + dz0))),
                     ]
                 m_rings.append(ring)
+            n_r = len(m_rings[0])
             for i_m in range(len(m_rings) - 1):
                 r0, r1 = m_rings[i_m], m_rings[i_m + 1]
-                for k in range(4):
-                    kn = (k + 1) % 4
-                    bm_mir.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
-            bm_mir.faces.new((m_rings[0][0], m_rings[0][3], m_rings[0][2], m_rings[0][1]))
-            bm_mir.faces.new((m_rings[-1][0], m_rings[-1][1], m_rings[-1][2], m_rings[-1][3]))
+                for k in range(n_r):
+                    kn = (k + 1) % n_r
+                    f_m = bm_mir.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
+                    # Нижние грани корпуса (z < середины) -> Piano_Black, верхняя крышка -> Paint
+                    z_fc = f_m.calc_center_median().z
+                    f_m.material_index = 1 if z_fc < (zm_l + 0.056) else 0
+            # Торцевые заглушки (квадами — без n-gon!)
+            for end_ring, rev in ((m_rings[0], True), (m_rings[-1], False)):
+                if rev:
+                    f_a = bm_mir.faces.new((end_ring[0], end_ring[5], end_ring[2], end_ring[1]))
+                    f_b = bm_mir.faces.new((end_ring[5], end_ring[4], end_ring[3], end_ring[2]))
+                else:
+                    f_a = bm_mir.faces.new((end_ring[0], end_ring[1], end_ring[2], end_ring[5]))
+                    f_b = bm_mir.faces.new((end_ring[5], end_ring[2], end_ring[3], end_ring[4]))
+                f_a.material_index = 1
+                f_b.material_index = 0
+
+            # 6c. Зеркальное стекло с тыльной стороны корпуса (slot 2 = Chrome)
+            n_before_glass = len(bm_mir.faces)
+            add_box(bm_mir, xm_l - 0.062, xm_l - 0.055,
+                    ym_l + side * 0.062, ym_l + side * 0.175, zm_l + 0.032, zm_l + 0.092)
+            bm_mir.faces.ensure_lookup_table()
+            for f_idx in range(n_before_glass, len(bm_mir.faces)):
+                bm_mir.faces[f_idx].material_index = 2
+
+            # 6d. Тонкая LED-полоска повторителя поворотника спереди корпуса (slot 3 = DRL)
+            n_before_led = len(bm_mir.faces)
+            add_box(bm_mir, xm_l + 0.044, xm_l + 0.058,
+                    ym_l + side * 0.090, ym_l + side * 0.176, zm_l + 0.053, zm_l + 0.061)
+            bm_mir.faces.ensure_lookup_table()
+            for f_idx in range(n_before_led, len(bm_mir.faces)):
+                bm_mir.faces[f_idx].material_index = 3
+            _ = n_before_cap
 
             mir_ob = bmesh_to_object(f'Mirror_{m_tag}', bm_mir, material=mats['paint'],
                                      smooth=True, collection=collection, auto_smooth_deg=55.0,
-                                     bevel=0.0025, bevel_segs=2, subsurf=1)
+                                     bevel=0.0020, bevel_segs=2, subsurf=1)
+            mir_ob.data.materials.append(mats['piano_black'])
+            mir_ob.data.materials.append(mats['chrome'])
+            mir_ob.data.materials.append(mats['drl'])
             uv_box(mir_ob, scale=6.0)
             mir_ob.parent = door_ob
             mir_ob.location = Vector((0.0, 0.0, 0.0))
