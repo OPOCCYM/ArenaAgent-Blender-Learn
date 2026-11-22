@@ -476,6 +476,24 @@ def build_bumper_assemblies(vehicle):
             if any(obj.name.startswith(prefix) for prefix in prefixes):
                 obj.parent=bumper
                 obj.matrix_parent_inverse=bumper.matrix_world.inverted()
+    gap_mat=material('Bumper_Panel_Gap',(.008,.012,.016),.04,.58)
+    seam_paths={
+        'Front_Bumper_Gap':('Front_Bumper',[(-1.824,.79,.48),(-1.824,.80,.64),(-1.824,.72,.79),
+                                              (-1.824,.42,.84),(-1.824,0,.855),(-1.824,-.42,.84),
+                                              (-1.824,-.72,.79),(-1.824,-.80,.64),(-1.824,-.79,.48)]),
+        'Rear_Bumper_Gap':('Rear_Bumper',[(1.824,.78,.46),(1.824,.80,.61),(1.824,.72,.75),
+                                         (1.824,.40,.79),(1.824,0,.80),(1.824,-.40,.79),
+                                         (1.824,-.72,.75),(1.824,-.80,.61),(1.824,-.78,.46)]),
+    }
+    for name,(parent_name,coords) in seam_paths.items():
+        data=bpy.data.curves.new(name+'_Curve','CURVE'); data.dimensions='3D'
+        data.bevel_depth=.0022; data.bevel_resolution=2; data.resolution_u=1
+        spline=data.splines.new('POLY'); spline.points.add(len(coords)-1)
+        for point,co in zip(spline.points,coords): point.co=(*co,1)
+        data.materials.append(gap_mat)
+        seam=bpy.data.objects.new(name,data); vehicle.objects.link(seam)
+        parent=bpy.data.objects[parent_name]; seam.parent=parent
+        seam.matrix_parent_inverse=parent.matrix_world.inverted()
     bpy.context.view_layer.update()
 
 

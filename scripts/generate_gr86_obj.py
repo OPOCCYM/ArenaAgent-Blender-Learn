@@ -162,9 +162,9 @@ def generate(path):
         o.use('Graphite_Alloy'); o.box('Door_Handle_'+str(side),(.57,side*.858,.79),(.095,.004,.012))
         o.use('Tire_Rubber')
         # Fine panel gaps sit close to the body instead of reading as protruding black bars.
-        o.box('Door_Gap_Front_'+str(side),(-.77,side*.857,.70),(.006,.004,.31))
-        o.box('Door_Gap_Rear_'+str(side),(1.02,side*.851,.70),(.006,.004,.29))
-        o.box('Door_Gap_Bottom_'+str(side),(.16,side*.855,.535),(1.48,.004,.006))
+        o.box('Door_Gap_Front_'+str(side),(-.75,side*.857,.70),(.004,.004,.31))
+        o.box('Door_Gap_Rear_'+str(side),(.75,side*.851,.70),(.004,.004,.29))
+        o.box('Door_Gap_Bottom_'+str(side),(0,side*.855,.535),(1.40,.004,.004))
         o.use('Pearl_White')
         o.box('Side_Skirt_'+str(side),(.12,side*.855,.49),(1.42,.018,.05))
         o.use('Graphite_Alloy'); o.box('Front_Fender_Vent_'+str(side),(-1.03,side*.850,.735),(.105,.004,.032))
