@@ -17,6 +17,9 @@ for name in ('Hood_Panel','Trunk_Lid','Roof_Panel','Door_L','Door_R','Front_Fend
     panel=bpy.data.objects.get(name)
     assert panel and panel.type=='MESH' and len(panel.data.polygons)>20, f'missing separated body panel: {name}'
 assert body.dimensions.z>.8, body.dimensions[:]
+hood=bpy.data.objects['Hood_Panel']; trunk=bpy.data.objects['Trunk_Lid']
+assert hood.dimensions.x>1.0 and hood.dimensions.y>1.2, f'hood skin must span the full bonnet: {hood.dimensions[:]}'
+assert trunk.dimensions.x>.75 and trunk.dimensions.y>1.2, f'trunk lid skin must span the full deck: {trunk.dimensions[:]}'
 assert bpy.data.objects.get('Body_Shell') and any(o.name.startswith('Front_Door_Glass_') for o in scene.objects), 'window aperture/glazing assembly missing'
 for panel,hinge in (('Hood_Panel','Hinge_Hood'),('Trunk_Lid','Hinge_Trunk'),('Door_L','Hinge_Door_L'),('Door_R','Hinge_Door_R')):
     ob=bpy.data.objects[panel]

@@ -167,7 +167,7 @@ def build_parametric_shell():
                 elif .75<xm<1.90: part=f'Rear_Quarter_{"L" if side>0 else "R"}'
             # Hood and trunk are separate crown/upper-side skins; the aperture ends
             # align to the front cowl and rear deck break.
-            if lo>=10 and hi<=15:
+            if lo>=10 and hi<=18:
                 if xm<-.97: part='Hood_Panel'
                 elif xm>1.00: part='Trunk_Lid'
             # Roof is a discrete shell, leaving its perimeter adjacent to the A/C
