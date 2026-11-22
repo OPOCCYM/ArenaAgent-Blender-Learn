@@ -325,15 +325,15 @@ def build_parametric_shell():
         for i in range(count+1):
             x=-.54+1.08*i/count; w=smooth_curve(CURVES['width'],x)
             # Door skin shoulder bead, offset just outside the curved side panel.
-            z=.665+.018*math.sin(math.pi*i/count)
-            y=side*(w*.986+.012)
-            dverts.extend([(x,y-side*.006,z),(x,y+side*.006,z)])
+            z=.690+.006*math.sin(math.pi*i/count)
+            y=side*(w*.960+.002)
+            dverts.extend([(x,y-side*.0025,z),(x,y+side*.0025,z)])
         for i in range(count): dfaces.append((2*i,2*i+1,2*i+3,2*i+2))
         dm=bpy.data.meshes.new(f'Door_Crease_{letter}_Mesh'); dm.from_pydata(dverts,[],dfaces); dm.update()
         dm.materials.append(paint); doorline=bpy.data.objects.new(f'Door_Crease_{letter}',dm)
         bpy.data.collections['GR86_Model'].objects.link(doorline)
         for p in dm.polygons: p.use_smooth=True
-        edge=doorline.modifiers.new('Door character ridge','SOLIDIFY'); edge.thickness=.002
+        edge=doorline.modifiers.new('Door character ridge','SOLIDIFY'); edge.thickness=.001
     return shell
 
 def build_interior(vehicle):
@@ -390,7 +390,7 @@ def build_interior(vehicle):
 def build_engine_bay(vehicle):
     """Add the visible engine-bay hard points exposed by the hood-open review pose."""
     block_mat=material('Powertrain_Aluminium',(.22,.24,.25),.68,.34)
-    cover_mat=material('Powertrain_Cover',(.055,.065,.075),.12,.42)
+    cover_mat=material('Powertrain_Cover',(.12,.14,.16),.28,.34)
     bright=material('Powertrain_Metal',(.52,.55,.58),.78,.24)
     battery_mat=material('Powertrain_Battery',(.10,.12,.13),.06,.48)
     def cube(name,loc,size,mat,bevel=.015):
@@ -407,6 +407,7 @@ def build_engine_bay(vehicle):
     cube('Cylinder_Head_L',(-1.36,.145,.725),(.40,.20,.075),bright,.018)
     cube('Cylinder_Head_R',(-1.36,-.145,.725),(.40,.20,.075),bright,.018)
     cube('Intake_Plenum',(-1.17,0,.79),(.25,.40,.095),cover_mat,.028)
+    cube('Engine_Cover',(-1.36,0,.815),(.34,.42,.045),cover_mat,.018)
     cube('Radiator_Core',(-1.91,0,.535),(.075,1.02,.32),cover_mat,.012)
     cube('Battery_Box',(-1.68,.43,.63),(.20,.18,.18),battery_mat,.018)
     for side in (-1,1):
@@ -419,6 +420,41 @@ def build_engine_bay(vehicle):
     brace=bpy.context.object; brace.name='Strut_Brace_EngineBay'; brace.data.materials.append(bright)
     for c in list(brace.users_collection): c.objects.unlink(brace)
     vehicle.objects.link(brace)
+
+
+def build_lamp_optics(vehicle):
+    """Give the angular front and rear lamp panels genuine depth and optical modules."""
+    led_white=material('LED_White',(.72,.86,1.0),.08,.18)
+    led_red=material('LED_Red',(.72,.018,.012),.05,.2)
+    for mat,color in ((led_white,(.55,.74,1.0,1)),(led_red,(.8,.008,.004,1))):
+        bsdf=mat.node_tree.nodes.get('Principled BSDF') if mat.use_nodes else None
+        if bsdf and 'Emission Color' in bsdf.inputs:
+            bsdf.inputs['Emission Color'].default_value=color
+            bsdf.inputs['Emission Strength'].default_value=.35
+    alloy=material('Lamp_Reflector',(.72,.75,.78),.78,.2)
+    def ellipsoid(name,loc,scale,mat):
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=24,ring_count=12,location=loc)
+        ob=bpy.context.object; ob.name=name; ob.scale=scale
+        bpy.ops.object.transform_apply(location=False,rotation=False,scale=True)
+        ob.data.materials.append(mat)
+        for p in ob.data.polygons: p.use_smooth=True
+        for c in list(ob.users_collection): c.objects.unlink(ob)
+        vehicle.objects.link(ob)
+        return ob
+    for side in (-1,1):
+        ellipsoid(f'Headlamp_Projector_{side}',(-2.163,side*.475,.752),(.020,.050,.024),alloy)
+        ellipsoid(f'Headlamp_Outer_Optic_{side}',(-2.165,side*.565,.752),(.012,.022,.012),led_white)
+        ellipsoid(f'TailLamp_3D_Lens_{side}',(2.154,side*.575,.795),(.020,.15,.040),led_red)
+        # Bevelled 3-D light guides conform to the existing angular headlamp aperture.
+        coords=[(.36,.739),(.39,.775),(.44,.783),(.555,.776),(.598,.755),(.575,.735)]
+        data=bpy.data.curves.new(f'Headlamp_DRL_{side}_Curve','CURVE'); data.dimensions='3D'
+        data.bevel_depth=.0045; data.bevel_resolution=3; data.resolution_u=2
+        spline=data.splines.new('POLY'); spline.points.add(len(coords)-1)
+        for p,(y,z) in zip(spline.points,coords): p.co=(-2.173,side*y,z,1)
+        drl=bpy.data.objects.new(f'Headlamp_DRL_{side}',data); vehicle.objects.link(drl); data.materials.append(led_white)
+        # Two slim red optical bars sit behind the raised rear lens volume.
+        for k,z in enumerate((.781,.803)):
+            ellipsoid(f'TailLamp_Bar_{side}_{k}',(2.173,side*.575,z),(.009,.105,.0045),led_red)
 
 
 def main():
@@ -453,10 +489,17 @@ def main():
         if obj.name.startswith(('Side_Skirt_','Front_Splitter','Rear_Diffuser','Trunk_Lip','Front_Fender_Vent_','Door_Handle_','Rear_Plate')):
             bevel=obj.modifiers.new('Soft manufactured edges','BEVEL')
             bevel.width=.003; bevel.segments=2
+        if obj.name.startswith(('Headlamp_Bezel_','TailLamp_Bezel_','TailLamp_')):
+            solid=obj.modifiers.new('Lamp housing depth','SOLIDIFY'); solid.thickness=.010; solid.offset=-.35
+            bevel=obj.modifiers.new('Lens perimeter radius','BEVEL'); bevel.width=.004; bevel.segments=3
+        elif obj.name.startswith('Headlamp_Lens_'):
+            solid=obj.modifiers.new('Optical lens thickness','SOLIDIFY'); solid.thickness=.006; solid.offset=-.4
+            bevel=obj.modifiers.new('Lens edge radius','BEVEL'); bevel.width=.0025; bevel.segments=3
 
     build_parametric_shell()
     build_interior(vehicle)
     build_engine_bay(vehicle)
+    build_lamp_optics(vehicle)
     imported=[obj for obj in vehicle.objects]
     rig=bpy.data.collections.new('GR86_Rig'); scene.collection.children.link(rig)
     # Independent transform roots let animators swing panels about plausible hinge axes.
