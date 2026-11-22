@@ -36,7 +36,9 @@
     {name:'Rear three-quarter',file:'gr86_rear_3_4.png',alt:'Rear three-quarter view'},
     {name:'Cockpit',file:'gr86_cockpit.png',alt:'Cockpit view'},
     {name:'Panels open · hinge study',file:'gr86_panels_open.png',alt:'Hood, doors and trunk open to show separate hinged geometry'},
-    {name:'Engine bay detail',file:'gr86_engine_bay.png',alt:'Close view of engine and hardware under the raised hood'}
+    {name:'Engine bay detail',file:'gr86_engine_bay.png',alt:'Close view of engine and hardware under the raised hood'},
+    {name:'Front bumper off',file:'gr86_front_bumper_off.png',alt:'Front bumper detached to reveal crash beam and mounting structure'},
+    {name:'Rear bumper off',file:'gr86_rear_bumper_off.png',alt:'Rear bumper detached to reveal reinforcement beam and mounting structure'}
   ];
   let active=0; const img=document.querySelector('#large'),label=document.querySelector('#label'),grid=document.querySelector('#grid'),hero=document.querySelector('#hero');
   const cards=shots.map((s,i)=>{const b=document.createElement('button');b.className='shot';b.innerHTML=`<img src="../assets/renders/cycles/${s.file}" alt="${s.alt}" loading="lazy"><span>${s.name}</span>`;b.onclick=()=>select(i);grid.append(b);return b});

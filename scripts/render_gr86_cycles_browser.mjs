@@ -23,8 +23,8 @@ const PORT=4179;
 const SAMPLES=Number(process.env.GR86_CYCLES_SAMPLES||64);
 const WIDTH=Number(process.env.GR86_CYCLES_WIDTH||800);
 const HEIGHT=Number(process.env.GR86_CYCLES_HEIGHT||550);
-const ALL_SHOTS=[['front_3_4','Cam_Exterior'],['side','Cam_Side'],['rear_3_4','Cam_Rear'],['cockpit','Cam_Cockpit'],['panels_open','Cam_Side'],['engine_bay','Cam_Exterior']];
-const EXTRA_SHOTS=new Set(['panels_open','engine_bay']);
+const ALL_SHOTS=[['front_3_4','Cam_Exterior'],['side','Cam_Side'],['rear_3_4','Cam_Rear'],['cockpit','Cam_Cockpit'],['panels_open','Cam_Side'],['engine_bay','Cam_Exterior'],['front_bumper_off','Cam_Exterior'],['rear_bumper_off','Cam_Rear']];
+const EXTRA_SHOTS=new Set(['panels_open','engine_bay','front_bumper_off','rear_bumper_off']);
 const requested=process.env.GR86_CYCLES_SHOT?.split(',').map(x=>x.trim()).filter(Boolean);
 const SHOTS=requested?ALL_SHOTS.filter(([slug])=>requested.includes(slug)):ALL_SHOTS.filter(([slug])=>!EXTRA_SHOTS.has(slug));
 if(!SHOTS.length||requested&&SHOTS.length!==requested.length)throw new Error(`Unknown GR86_CYCLES_SHOT: ${requested}`);
@@ -111,20 +111,29 @@ os.makedirs('/out/cycles',exist_ok=True)`;
 const RENDER_LOOP=`import math
 from mathutils import Vector
 for slug,cam in [${pyShots}]:
+ for root_name in ('Hinge_Hood','Hinge_Trunk','Hinge_Door_L','Hinge_Door_R'):
+  bpy.data.objects[root_name].rotation_euler=(0,0,0)
+ for ob in bpy.data.objects:
+  if ob.name in ('Front_Bumper','Rear_Bumper') or (ob.parent and ob.parent.name in ('Front_Bumper','Rear_Bumper')): ob.hide_render=False
  if slug in ('panels_open','engine_bay'):
-  for root_name in ('Hinge_Hood','Hinge_Trunk','Hinge_Door_L','Hinge_Door_R'):
-   bpy.data.objects[root_name].rotation_euler=(0,0,0)
   bpy.data.objects['Hinge_Hood'].rotation_euler[1]=math.radians(48 if slug=='panels_open' else 54)
   if slug=='panels_open':
    bpy.data.objects['Hinge_Trunk'].rotation_euler[1]=math.radians(-43)
    bpy.data.objects['Hinge_Door_L'].rotation_euler[2]=math.radians(72)
    bpy.data.objects['Hinge_Door_R'].rotation_euler[2]=math.radians(-72)
-  bpy.context.view_layer.update()
+ if slug in ('front_bumper_off','rear_bumper_off'):
+  bumper_name='Front_Bumper' if slug=='front_bumper_off' else 'Rear_Bumper'
+  bumper=bpy.data.objects[bumper_name]; bumper.hide_render=True
+  for ob in bpy.data.objects:
+   if ob.parent==bumper: ob.hide_render=True
+ bpy.context.view_layer.update()
+ if slug in ('panels_open','engine_bay','front_bumper_off','rear_bumper_off'):
   review_cam=bpy.data.objects[cam]
-  target=Vector((-.05,0,.60)) if slug=='panels_open' else Vector((-1.35,0,.66))
-  review_cam.location=(-4.2,-6.0,4.1) if slug=='panels_open' else (-3.0,-3.5,2.9)
-  review_cam.rotation_euler=(target-review_cam.location).to_track_quat('-Z','Y').to_euler()
-  review_cam.data.lens=56 if slug=='panels_open' else 68
+  if slug=='panels_open': target=Vector((-.05,0,.60)); review_cam.location=(-4.2,-6.0,4.1); lens=56
+  elif slug=='engine_bay': target=Vector((-1.35,0,.66)); review_cam.location=(-3.0,-3.5,2.9); lens=68
+  elif slug=='front_bumper_off': target=Vector((-1.82,0,.58)); review_cam.location=(-4.4,-4.9,2.6); lens=68
+  else: target=Vector((1.82,0,.58)); review_cam.location=(4.3,4.8,2.6); lens=68
+  review_cam.rotation_euler=(target-review_cam.location).to_track_quat('-Z','Y').to_euler(); review_cam.data.lens=lens
  s.camera=bpy.data.objects[cam]; s.render.filepath='/out/cycles/gr86_'+slug+'.bmp'
  bpy.ops.render.render(write_still=True); print('CYCLES_FRAME',slug)`;
 function serve(){

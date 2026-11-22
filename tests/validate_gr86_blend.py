@@ -41,6 +41,11 @@ for side in ('1','-1'):
     hinge=bpy.data.objects[f'Hinge_Door_{"L" if side=="1" else "R"}']
     for component in ('Door_Card','Door_Armrest','Door_Release','Door_Speaker'):
         assert bpy.data.objects[f'{component}_{side}'].parent==hinge, f'{component} must move with its door'
+for name in ('Front_Crash_Beam','Rear_Crash_Beam','Front_Crush_Can_1','Rear_Crush_Can_1'):
+    ob=bpy.data.objects.get(name)
+    assert ob and ob.type=='MESH' and len(ob.data.polygons)>=8, f'missing shaped bumper support: {name}'
+assert bpy.data.objects['Front_Crash_Beam'].dimensions.y>1.2 and bpy.data.objects['Front_Crash_Beam'].dimensions.x>.10
+assert bpy.data.objects['Rear_Crash_Beam'].dimensions.y>1.2 and bpy.data.objects['Rear_Crash_Beam'].dimensions.x>.10
 for name in ('Engine_Block','Cylinder_Head_L','Cylinder_Head_R','Intake_Plenum','Engine_Cover','Radiator_Core','Battery_Box','Strut_Brace_EngineBay'):
     assert bpy.data.objects.get(name) and bpy.data.objects[name].type=='MESH', f'missing engine-bay part: {name}'
 for name in ('Headlamp_Projector_1','Headlamp_Outer_Optic_1','Headlamp_DRL_1','TailLamp_3D_Lens_1','TailLamp_Bar_1_0'):

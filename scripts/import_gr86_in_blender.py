@@ -425,6 +425,49 @@ def build_engine_bay(vehicle):
     vehicle.objects.link(brace)
 
 
+def build_crash_structure(vehicle):
+    """Curved extruded bumper beams and tapered crush cans remain on the chassis."""
+    beam_mat=material('Crash_Structure',(.25,.29,.32),.78,.28)
+    def add_mesh(name,verts,faces,bevel=.006):
+        me=bpy.data.meshes.new(name+'_Mesh'); me.from_pydata(verts,[],faces); me.validate(verbose=False); me.update()
+        me.materials.append(beam_mat); ob=bpy.data.objects.new(name,me); vehicle.objects.link(ob)
+        for p in me.polygons: p.use_smooth=True
+        if bevel:
+            mod=ob.modifiers.new('Stamped/extruded radii','BEVEL'); mod.width=bevel; mod.segments=2
+        return ob
+    # Broad shallow aluminum impact beam follows the bumper curvature in plan view.
+    def beam(name,xbase,yspan,zcenter,depth,height,curve_sign):
+        stations=20; profile=[(-.50,-.30),(-.38,-.50),(.38,-.50),(.50,-.30),
+                              (.50,.30),(.38,.50),(-.38,.50),(-.50,.30)]
+        verts=[]; faces=[]
+        for i in range(stations+1):
+            y=-yspan/2+yspan*i/stations; q=(2*y/yspan)**2
+            x=xbase+curve_sign*.060*q
+            for dx,dz in profile: verts.append((x+dx*depth,y,zcenter+dz*height))
+        n=len(profile)
+        for i in range(stations):
+            for j in range(n):
+                a=i*n+j; b=i*n+(j+1)%n
+                faces.append((a,b,b+n,a+n))
+        faces.extend([tuple(reversed(range(n))),tuple(stations*n+j for j in range(n))])
+        return add_mesh(name,verts,faces,.006)
+    beam('Front_Crash_Beam',-1.765,1.38,.505,.11,.125,1)
+    beam('Rear_Crash_Beam',1.765,1.32,.505,.105,.12,-1)
+    # Eight-sided stepped crush cans taper toward the chassis rails instead of being boxes.
+    def can(name,x_inner,x_outer,y,z,wy_inner,wy_outer,hz):
+        sides=8; verts=[]; faces=[]
+        for x,wy in ((x_inner,wy_inner),(x_outer,wy_outer)):
+            for i in range(sides):
+                a=2*math.pi*i/sides+math.pi/8
+                verts.append((x,y+wy*math.cos(a),z+hz*math.sin(a)))
+        for i in range(sides): faces.append((i,(i+1)%sides,sides+(i+1)%sides,sides+i))
+        faces.extend([tuple(reversed(range(sides))),tuple(sides+i for i in range(sides))])
+        return add_mesh(name,verts,faces,.004)
+    for side in (-1,1):
+        can(f'Front_Crush_Can_{side}',-1.61,-1.72,side*.48,.505,.060,.074,.064)
+        can(f'Rear_Crush_Can_{side}',1.61,1.72,side*.46,.505,.058,.070,.061)
+
+
 def build_lamp_optics(vehicle):
     """Give the angular front and rear lamp panels genuine depth and optical modules."""
     led_white=material('LED_White',(.72,.86,1.0),.08,.18)
@@ -539,6 +582,7 @@ def main():
     build_parametric_shell()
     build_interior(vehicle)
     build_engine_bay(vehicle)
+    build_crash_structure(vehicle)
     build_lamp_optics(vehicle)
     build_bumper_assemblies(vehicle)
     imported=[obj for obj in vehicle.objects]
