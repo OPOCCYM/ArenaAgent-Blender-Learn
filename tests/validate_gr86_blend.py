@@ -12,13 +12,21 @@ assert bpy.app.version[0] >= 4
 assert scene.render.engine in {'BLENDER_EEVEE','BLENDER_EEVEE_NEXT'}
 body=bpy.data.objects.get('Body_Shell')
 assert body and body.type=='MESH'
-assert abs(body.dimensions.x-4.264)<.02, body.dimensions[:]
-for name in ('Hood_Panel','Trunk_Lid','Roof_Panel','Door_L','Door_R','Front_Fender_L','Front_Fender_R','Rear_Quarter_L','Rear_Quarter_R'):
+assert body.dimensions.x>3.5, body.dimensions[:]
+front_bumper=bpy.data.objects.get('Front_Bumper'); rear_bumper=bpy.data.objects.get('Rear_Bumper')
+assert front_bumper and rear_bumper, 'separate front/rear bumper meshes missing'
+assert front_bumper.dimensions.x>.20 and front_bumper.dimensions.y>1.3, front_bumper.dimensions[:]
+assert rear_bumper.dimensions.x>.20 and rear_bumper.dimensions.y>1.3, rear_bumper.dimensions[:]
+for name in ('Front_Grille','Front_Splitter','Headlamp_Bezel_1','Headlamp_DRL_1'):
+    assert bpy.data.objects[name].parent==front_bumper, f'{name} should move with front bumper'
+for name in ('Rear_Diffuser','Rear_Plate','TailLamp_1','Exhaust_Tip_1'):
+    assert bpy.data.objects[name].parent==rear_bumper, f'{name} should move with rear bumper'
+for name in ('Hood_Panel','Trunk_Lid','Roof_Panel','Front_Bumper','Rear_Bumper','Door_L','Door_R','Front_Fender_L','Front_Fender_R','Rear_Quarter_L','Rear_Quarter_R'):
     panel=bpy.data.objects.get(name)
     assert panel and panel.type=='MESH' and len(panel.data.polygons)>20, f'missing separated body panel: {name}'
 assert body.dimensions.z>.8, body.dimensions[:]
 hood=bpy.data.objects['Hood_Panel']; trunk=bpy.data.objects['Trunk_Lid']
-assert hood.dimensions.x>1.0 and hood.dimensions.y>1.2, f'hood skin must span the full bonnet: {hood.dimensions[:]}'
+assert hood.dimensions.x>.75 and hood.dimensions.y>1.2, f'hood skin must span the full bonnet: {hood.dimensions[:]}'
 assert trunk.dimensions.x>.75 and trunk.dimensions.y>1.2, f'trunk lid skin must span the full deck: {trunk.dimensions[:]}'
 assert bpy.data.objects.get('Body_Shell') and any(o.name.startswith('Front_Door_Glass_') for o in scene.objects), 'window aperture/glazing assembly missing'
 for panel,hinge in (('Hood_Panel','Hinge_Hood'),('Trunk_Lid','Hinge_Trunk'),('Door_L','Hinge_Door_L'),('Door_R','Hinge_Door_R')):

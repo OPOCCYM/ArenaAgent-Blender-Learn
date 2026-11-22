@@ -174,10 +174,13 @@ def build_parametric_shell():
             # pillars; pillars bridge it to the beltline around the glazing.
             if lo>=15 and hi<=18 and -.56<xm<.53:
                 part='Roof_Panel'
+            # Full-width front and rear bumper covers are separate stamped fascia shells.
+            if xm< -1.82: part='Front_Bumper'
+            elif xm>1.82: part='Rear_Bumper'
             face_parts.append(part)
-    faces.append(tuple(reversed(range(n_ring)))); face_mats.append(0); face_parts.append('Body_Shell')
+    faces.append(tuple(reversed(range(n_ring)))); face_mats.append(0); face_parts.append('Front_Bumper')
     last=(len(sections)-1)*n_ring
-    faces.append(tuple(last+j for j in range(n_ring))); face_mats.append(0); face_parts.append('Body_Shell')
+    faces.append(tuple(last+j for j in range(n_ring))); face_mats.append(0); face_parts.append('Rear_Bumper')
     mats=[bpy.data.materials.get('Pearl_White'),bpy.data.materials.get('Glass_Dark'),
           bpy.data.materials.get('Window_Trim') or material('Window_Trim',(.012,.016,.022),.1,.24)]
     components={}
@@ -198,7 +201,7 @@ def build_parametric_shell():
         ob=bpy.data.objects.new(part,mesh); bpy.data.collections['GR86_Model'].objects.link(ob)
         ob['component_type']='main body shell' if part=='Body_Shell' else 'separate exterior panel'
         ob['construction']='Split from dense longitudinal loft; independent mesh object'
-        if part in {'Hood_Panel','Trunk_Lid','Roof_Panel'} or part.startswith(('Door_','Front_Fender_','Rear_Quarter_')):
+        if part in {'Hood_Panel','Trunk_Lid','Roof_Panel','Front_Bumper','Rear_Bumper'} or part.startswith(('Door_','Front_Fender_','Rear_Quarter_')):
             solid=ob.modifiers.new('Panel return / sheet thickness','SOLIDIFY')
             solid.thickness=.008 if part.startswith('Door_') else .010
             solid.offset=-.25
@@ -457,6 +460,25 @@ def build_lamp_optics(vehicle):
             ellipsoid(f'TailLamp_Bar_{side}_{k}',(2.173,side*.575,z),(.009,.105,.0045),led_red)
 
 
+def build_bumper_assemblies(vehicle):
+    """Keep bumper-mounted optics, grille, plate and diffuser attached to their fascia."""
+    bpy.context.view_layer.update()
+    groups={
+        'Front_Bumper':('Front_Grille','Grille_Slat_','Front_Badge','Headlamp_Bezel_',
+                        'Headlamp_Lens_','Headlamp_Projector_','Headlamp_Outer_Optic_','Headlamp_DRL_','Front_Splitter'),
+        'Rear_Bumper':('TailLamp_','Rear_Plate','Plate_Glyph_','Exhaust_Tip_','Rear_Diffuser','Diffuser_Fin_'),
+    }
+    for bumper_name,prefixes in groups.items():
+        bumper=bpy.data.objects[bumper_name]
+        bumper['assembly']='Independent bumper cover with fascia-mounted components'
+        for obj in list(vehicle.objects):
+            if obj==bumper or obj.parent: continue
+            if any(obj.name.startswith(prefix) for prefix in prefixes):
+                obj.parent=bumper
+                obj.matrix_parent_inverse=bumper.matrix_world.inverted()
+    bpy.context.view_layer.update()
+
+
 def main():
     if not os.path.isfile(OBJ_PATH): raise FileNotFoundError(OBJ_PATH)
     bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete(use_global=False)
@@ -500,6 +522,7 @@ def main():
     build_interior(vehicle)
     build_engine_bay(vehicle)
     build_lamp_optics(vehicle)
+    build_bumper_assemblies(vehicle)
     imported=[obj for obj in vehicle.objects]
     rig=bpy.data.collections.new('GR86_Rig'); scene.collection.children.link(rig)
     # Independent transform roots let animators swing panels about plausible hinge axes.
