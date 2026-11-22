@@ -1057,6 +1057,15 @@ def main(argv):
 
     animate(wheels, steering, body_ob)
 
+    # --- имена объектов: UE-стиль (без пробелов/скобок/знаков +-) ---
+    import re
+    for ob in bpy.data.objects:
+        if ob.type == 'MESH':
+            ob.name = re.sub(r'[^A-Za-z0-9_]', '_', ob.name)
+            ob.name = re.sub(r'_+', '_', ob.name).strip('_')
+            if not ob.name or ob.name[0].isdigit():
+                ob.name = 'obj_' + ob.name
+
     setup_render()
     blend_path = os.path.abspath('car_realistic.blend')
     bpy.ops.wm.save_as_mainfile(filepath=blend_path, check_existing=False)
