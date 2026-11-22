@@ -330,10 +330,43 @@ def apply_roughness_map(material, image_name, filename):
 
 def mat_paint():
     """CarPaint_MetallicBlue (0.055, 0.115, 0.280), Metallic 0.62, Roughness 0.26,
-    Coat 1.0/0.03, «апельсиновая корка» (процедурно + файловые карты normal/roughness)."""
+    Coat 1.0/0.03, «апельсиновая корка» — хлопья металлика через Bump+Noise,
+    переменная Coat Roughness через ValToRGB, файловые карты normal/roughness."""
     m = bpy.data.materials.new('CarPaint_MetallicBlue')
     m.use_nodes = True
     _bsdf_base(m, (0.055, 0.115, 0.280), 0.62, 0.26, coat=1.0, coat_rough=0.03)
+    nt = m.node_tree
+    nodes = nt.nodes
+    links = nt.links
+    bsdf = nodes.get('Principled BSDF')
+    # хлопья металлика -> микро-рельеф на нормали (как в volvo_s90_car_build.py)
+    tex = nodes.new('ShaderNodeTexNoise')
+    tex.name = 'PaintFlake_Noise'
+    tex.label = 'Paint Flake Noise'
+    tex.inputs['Scale'].default_value = 2400.0
+    tex.inputs['Detail'].default_value = 2.0
+    bump = nodes.new('ShaderNodeBump')
+    bump.name = 'PaintFlake_Bump'
+    bump.label = 'Paint Flake Bump'
+    bump.inputs['Strength'].default_value = 0.02
+    bump.inputs['Distance'].default_value = 0.0015
+    links.new(tex.outputs['Fac'], bump.inputs['Height'])
+    links.new(bump.outputs['Normal'], bsdf.inputs['Normal'])
+    # небольшая неоднородность лака (без изменения цвета)
+    n2 = nodes.new('ShaderNodeTexNoise')
+    n2.name = 'CoatRough_Noise'
+    n2.label = 'Coat Roughness Noise'
+    n2.inputs['Scale'].default_value = 18.0
+    ramp = nodes.new('ShaderNodeValToRGB')
+    ramp.name = 'CoatRough_Ramp'
+    ramp.label = 'Coat Roughness Ramp'
+    ramp.color_ramp.elements[0].position = 0.35
+    ramp.color_ramp.elements[0].color = (0.020, 0.020, 0.020, 1)
+    ramp.color_ramp.elements[1].position = 0.65
+    ramp.color_ramp.elements[1].color = (0.060, 0.060, 0.060, 1)
+    links.new(n2.outputs['Fac'], ramp.inputs['Fac'])
+    links.new(ramp.outputs['Color'], bsdf.inputs['Coat Roughness'])
+    # файловые карты (если сгенерированы bake_maps.py) — перекрывают процедурное
     apply_normal_map(m, 'Normal_Body', 'normal_body.png')
     apply_roughness_map(m, 'Roughness_Body', 'roughness_body.png')
     return m
@@ -347,31 +380,31 @@ def mat_white(color=(0.9, 0.9, 0.9), roughness=0.9):
 
 
 def mat_glass():
-    """Glass_Window: Transparent + Glossy по Layer Weight (НЕ Transmission!),
-    тонировка 0.58."""
+    """Glass_Window: Transparent + Glossy с мультипликативным смешиванием
+    через Fresnel (как в volvo_s90_car_build.py). НЕ Transmission!"""
     m = bpy.data.materials.new('Glass_Window')
     m.use_nodes = True
     nt = m.node_tree
     nt.nodes.clear()
     out = nt.nodes.new('ShaderNodeOutputMaterial')
     trans = nt.nodes.new('ShaderNodeBsdfTransparent')
+    trans.inputs['Color'].default_value = (0.58, 0.64, 0.65, 1.0)
     gloss = nt.nodes.new('ShaderNodeBsdfGlossy')
-    gloss.inputs['Roughness'].default_value = 0.065
-    c = gloss.inputs['Color'].default_value
-    c[0], c[1], c[2] = 0.55, 0.70, 0.90
-    mix_col = nt.nodes.new('ShaderNodeMixRGB')
-    mix_col.blend_type = 'MIX'
-    mix_col.inputs['Fac'].default_value = 0.58
-    mix_col.inputs['Color1'].default_value = (0.30, 0.40, 0.55, 1.0)
-    mix_col.inputs['Color2'].default_value = c[:]
-    nt.links.new(mix_col.outputs['Color'], gloss.inputs['Color'])
-    lw = nt.nodes.new('ShaderNodeLayerWeight')
-    lw.blend_type = 'FRESNEL'
+    gloss.inputs['Roughness'].default_value = 0.035
+    fres = nt.nodes.new('ShaderNodeLayerWeight')
+    fres.blend_type = 'FRESNEL'
+    fres.inputs['Blend'].default_value = 0.12
     mix = nt.nodes.new('ShaderNodeMixShader')
-    nt.links.new(lw.outputs['Fresnel'], mix.inputs['Fac'])
+    mm = nt.nodes.new('ShaderNodeMath')
+    mm.operation = 'MULTIPLY_ADD'
+    mm.inputs[1].default_value = 0.42
+    mm.inputs[2].default_value = 0.05
+    nt.links.new(fres.outputs['Fresnel'], mm.inputs[0])
+    nt.links.new(mm.outputs['Value'], mix.inputs['Fac'])
     nt.links.new(trans.outputs[0], mix.inputs[1])
     nt.links.new(gloss.outputs[0], mix.inputs[2])
     nt.links.new(mix.outputs[0], out.inputs['Surface'])
+    m.blend_method = 'BLEND'
     return m
 
 
@@ -460,6 +493,14 @@ def mat_leather(name, color, scale=9.0, roughness=0.65):
     nt.links.new(noise.outputs['Fac'], mix_col.inputs['Color2'])
     nt.links.new(mix_col.outputs['Color'], bsdf.inputs['Base Color'])
     nt.links.new(wave.outputs['Fac'], bsdf.inputs['Roughness'])
+    # зерно кожи через Bump (как в volvo_s90_car_build.py)
+    bump = nt.nodes.new('ShaderNodeBump')
+    bump.name = 'Leather_Bump'
+    bump.label = 'Leather Bump'
+    bump.inputs['Strength'].default_value = 0.14
+    bump.inputs['Distance'].default_value = 0.0008
+    nt.links.new(noise.outputs['Fac'], bump.inputs['Height'])
+    nt.links.new(bump.outputs['Normal'], bsdf.inputs['Normal'])
     # файловые карты кожи (если сгенерированы bake_maps.py)
     apply_normal_map(m, 'Normal_Leather', 'normal_leather.png')
     nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
@@ -481,9 +522,49 @@ def mat_emission(name, strength, color=(1.0, 1.0, 1.0)):
 
 
 def mat_carbon():
+    """Углепластик — Checker через UV с тёмными оттенками (как в volvo)."""
     m = bpy.data.materials.new('Carbon_Corpus')
     m.use_nodes = True
-    _bsdf_base(m, (0.10, 0.10, 0.10), 0.85, 0.35)
+    _bsdf_base(m, (0.020, 0.022, 0.026), 0.15, 0.30)
+    nt = m.node_tree
+    nodes = nt.nodes
+    links = nt.links
+    bsdf = nodes.get('Principled BSDF')
+    uv = nodes.new('ShaderNodeTexCoord')
+    mp = nodes.new('ShaderNodeMapping')
+    mp.inputs['Scale'].default_value = (120.0, 120.0, 120.0)
+    chk = nodes.new('ShaderNodeTexChecker')
+    chk.inputs['Scale'].default_value = 1.0
+    chk.inputs['Color1'].default_value = (0.030, 0.032, 0.036, 1)
+    chk.inputs['Color2'].default_value = (0.012, 0.013, 0.015, 1)
+    links.new(uv.outputs['Object'], mp.inputs['Vector'])
+    links.new(mp.outputs['Vector'], chk.inputs['Vector'])
+    links.new(chk.outputs['Color'], bsdf.inputs['Base Color'])
+    return m
+
+
+def _pbr(name, color, metallic, rough, coat=0.0, coat_rough=0.05,
+         transmission=0.0, emission=None, emit_str=0.0, alpha=1.0):
+    """Универсальный PBR-материал (как pbr() в volvo_s90_car_build.py)."""
+    m = bpy.data.materials.new(name)
+    m.use_nodes = True
+    nt = m.node_tree
+    bsdf = nt.nodes.get('Principled BSDF')
+    c = bsdf.inputs['Base Color'].default_value
+    c[0], c[1], c[2], c[3] = color[0], color[1], color[2], 1.0
+    bsdf.inputs['Metallic'].default_value = metallic
+    bsdf.inputs['Roughness'].default_value = rough
+    if coat:
+        bsdf.inputs['Coat Weight'].default_value = coat
+        bsdf.inputs['Coat Roughness'].default_value = coat_rough
+    if transmission and 'Transmission Weight' in bsdf.inputs:
+        bsdf.inputs['Transmission Weight'].default_value = transmission
+    if alpha < 1.0:
+        bsdf.inputs['Alpha'].default_value = alpha
+        m.blend_method = 'BLEND'
+    if emission is not None:
+        bsdf.inputs['Emission Color'].default_value = (*emission, 1.0)
+        bsdf.inputs['Emission Strength'].default_value = emit_str
     return m
 
 
@@ -503,6 +584,25 @@ def make_materials():
         'tail': mat_emission('Tail_Light', 0.16, (0.95, 0.10, 0.12)),
         'carbon': mat_carbon(),
         'white': mat_white(),
+        # --- новые материалы из идей volvo_s90_car_build.py ---
+        'chrome': _pbr('Chrome', (0.92, 0.93, 0.95), 1.0, 0.035),
+        'alu': _pbr('Aluminium', (0.72, 0.73, 0.75), 1.0, 0.22),
+        'steel': _pbr('Steel', (0.30, 0.30, 0.32), 1.0, 0.42),
+        'disc': _pbr('Brake_Disc', (0.26, 0.26, 0.27), 1.0, 0.55),
+        'caliper': _pbr('Brake_Caliper', (0.32, 0.03, 0.03), 0.30, 0.35),
+        'liner': _pbr('WheelWell_Liner', (0.020, 0.020, 0.021), 0.0, 0.78),
+        'badge': _pbr('Badge', (0.90, 0.91, 0.93), 1.0, 0.08),
+        'badge_r': _pbr('Red_Badge', (0.40, 0.02, 0.02), 0.0, 0.25),
+        'screen': _pbr('Screen', (0.010, 0.012, 0.016), 0.0, 0.12,
+                       emission=(0.15, 0.28, 0.45), emit_str=1.2),
+        'leather_acc': mat_leather('Leather_Accent', (0.055, 0.030, 0.022),
+                                   scale=320.0),
+        'plastic': _pbr('Interior_Plastic', (0.020, 0.020, 0.022), 0.0, 0.55),
+        'soft': mat_leather('Dash_Soft', (0.028, 0.026, 0.026), 420.0),
+        'plate': _pbr('Plate', (0.86, 0.86, 0.88), 0.0, 0.32),
+        'mirror': _pbr('Mirror_Glass', (0.80, 0.82, 0.85), 1.0, 0.02),
+        'gunmetal': _pbr('Rim_Gunmetal', (0.12, 0.125, 0.135), 1.0, 0.30),
+        'gloss_black': _pbr('Piano_Black', (0.008, 0.008, 0.009), 0.0, 0.08),
     }
 
 
@@ -955,10 +1055,11 @@ def build_doors(body_ob, mats):
 # --------------------------------------------------------------------------- #
 # 10. Свет, мир, камеры
 # --------------------------------------------------------------------------- #
-def add_light(name, loc, energy, size=0.8, rot=None):
+def add_light(name, loc, energy, size=0.8, rot=None, color=(1.0, 1.0, 1.0)):
     ld = bpy.data.lights.new(name, 'AREA')
     ld.energy = energy
     ld.size = size
+    ld.color = color
     ob = bpy.data.objects.new(name, ld)
     ob.location = loc
     if rot is not None:
@@ -968,28 +1069,33 @@ def add_light(name, loc, energy, size=0.8, rot=None):
 
 
 def build_lighting(mats):
-    # интерьер (ватты, Area)
-    add_light('Int_RoofLight_F', Vector((0.55, 0.0, 1.30)), 1.9, size=0.35,
-              rot=(math.radians(90), 0, 0))
-    add_light('Int_RoofLight_M', Vector((-0.55, 0.0, 1.30)), 2.1, size=0.35,
-              rot=(math.radians(90), 0, 0))
-    add_light('Int_SeatLight', Vector((0.0, 0.45, 0.62)), 1.7, size=0.2,
-              rot=(math.radians(90), 0, 0))
-    add_light('Int_DashLight', Vector((1.30, 0.0, 0.95)), 0.9, size=0.25,
-              rot=(math.radians(100), 0, math.radians(10)))
-    add_light('Int_Ceiling', Vector((0.0, 0.0, 1.28)), 0.9, size=0.4,
-              rot=(math.radians(90), 0, 0))
-    # студийный свет: 6 Area-лампы вокруг машины
+    # интерьер (ватты, Area, тёплый белый как в volvo)
+    add_light('Int_RoofLight_F', Vector((0.55, 0.0, 1.30)), 3.4, size=0.34,
+              rot=(math.radians(90), 0, 0), color=(1.0, 0.96, 0.90))
+    add_light('Int_RoofLight_M', Vector((-0.55, 0.0, 1.345)), 3.8, size=0.44,
+              rot=(math.radians(90), 0, 0), color=(1.0, 0.96, 0.90))
+    add_light('Int_SeatLight', Vector((0.0, 0.45, 0.62)), 2.6, size=0.34,
+              rot=(math.radians(90), 0, 0), color=(1.0, 0.96, 0.90))
+    add_light('Int_DashLight', Vector((1.30, 0.0, 0.95)), 1.2, size=0.24,
+              rot=(math.radians(100), 0, math.radians(10)), color=(1.0, 0.96, 0.90))
+    add_light('Int_Ceiling', Vector((0.0, 0.0, 1.28)), 1.8, size=0.50,
+              rot=(math.radians(90), 0, 0), color=(1.0, 0.96, 0.90))
+    # студийный свет: 5 Area-ламп вокруг машины (как в volvo)
     studio = [
-        ('Studio_Light_1', Vector((-4.5, -4.5, 3.2)), 200.0),
-        ('Studio_Light_2', Vector((4.5, -4.5, 3.2)), 200.0),
-        ('Studio_Light_3', Vector((-6.0, 2.0, 2.6)), 150.0),
-        ('Studio_Light_4', Vector((6.0, 2.0, 2.6)), 150.0),
-        ('Studio_Light_5', Vector((0.0, 7.5, 3.6)), 250.0),
-        ('Studio_Light_6', Vector((0.0, -8.5, 2.2)), 120.0),
+        ('Studio_Light_1', Vector((-3.4, -5.2, 5.0)), 420.0, (5.0, 2.6),
+         (1.0, 0.98, 0.95)),
+        ('Studio_Light_2', Vector((4.6, 3.6, 4.2)), 220.0, (4.0, 2.0),
+         (0.92, 0.96, 1.0)),
+        ('Studio_Light_3', Vector((-5.6, 4.4, 3.4)), 260.0, (3.4, 1.4),
+         (0.85, 0.92, 1.0)),
+        ('Studio_Light_4', Vector((7.2, 0.0, 2.2)), 180.0, (1.2, 4.6),
+         (1.0, 1.0, 1.0)),
+        ('Studio_Light_5', Vector((0.4, 0.0, 6.4)), 260.0, (2.0, 5.0),
+         (1.0, 1.0, 1.0)),
     ]
-    for name, loc, en in studio:
-        add_light(name, loc, en, size=1.2, rot=(math.radians(70), 0, 0))
+    for name, loc, en, size, col in studio:
+        add_light(name, loc, en, size=size, rot=(math.radians(70), 0, 0),
+                  color=col)
     # циклорама позади машины
     cyc = new_object('Cyclorama', bpy.data.meshes.new('CycloramaMesh'))
     bmc = bmesh.new()
@@ -1000,21 +1106,36 @@ def build_lighting(mats):
     mec.materials.append(mats['white'])
     cyc.data = mec
     bpy.context.scene.collection.objects.link(cyc)
-    # мир + HDRI (если есть на диске; иначе сплошной фон)
+    # мир + HDRI (если есть на диске; иначе градиентный фон EASING как в volvo)
     world = bpy.data.worlds.new('World_Studio')
     bpy.context.scene.world = world
     world.use_nodes = True
     nt = world.node_tree
-    bg = nt.nodes.get('Background')
+    # очищаем дефолтные ноды
+    nt.nodes.clear()
+    out = nt.nodes.new('ShaderNodeOutputWorld')
+    bg = nt.nodes.new('ShaderNodeBackground')
+    bg.inputs['Strength'].default_value = 1.0
     hdri_path = os.path.join('hdri', 'studio_small_09.hdr')
     if os.path.exists(hdri_path):
         env = nt.nodes.new('ShaderNodeTexEnvironment')
         env.image = bpy.data.images.load(hdri_path)
         nt.links.new(env.outputs['Color'], bg.inputs['Color'])
-        bg.inputs['Strength'].default_value = 1.0
     else:
-        bg.inputs['Color'].default_value = (0.10, 0.10, 0.115, 1.0)
-        bg.inputs['Strength'].default_value = 1.0
+        # градиентный фон: тёмный низ, чуть светлее верх (EASING градиент)
+        grad = nt.nodes.new('ShaderNodeTexGradient')
+        grad.gradient_type = 'EASING'
+        mapn = nt.nodes.new('ShaderNodeMapping')
+        texc = nt.nodes.new('ShaderNodeTexCoord')
+        ramp = nt.nodes.new('ShaderNodeValToRGB')
+        ramp.color_ramp.elements[0].position = 0.25
+        ramp.color_ramp.elements[0].color = (0.015, 0.017, 0.022, 1)
+        ramp.color_ramp.elements[1].position = 0.85
+        ramp.color_ramp.elements[1].color = (0.075, 0.085, 0.105, 1)
+        nt.links.new(texc.outputs['Generated'], grad.inputs['Vector'])
+        nt.links.new(grad.outputs['Color'], ramp.inputs['Fac'])
+        nt.links.new(ramp.outputs['Color'], bg.inputs['Color'])
+    nt.links.new(bg.outputs['Background'], out.inputs['Surface'])
 
 
 def build_cameras():
@@ -1083,14 +1204,23 @@ def setup_render():
     scene.cycles.samples = 48
     scene.cycles.transparent_max_bounces = 48   # обязательно (иначе муар на стёклах)
     scene.cycles.blur_glossy = 2.0              # обязательно (иначе муар на стёклах)
+    scene.cycles.max_bounces = 8
+    scene.cycles.transmission_bounces = 6
+    scene.cycles.glossy_bounces = 4
+    scene.cycles.caustics_reflective = False
+    scene.cycles.caustics_refractive = False
+    scene.cycles.sample_clamp_indirect = 6.0
     scene.render.resolution_x = 1440
     scene.render.resolution_y = 810
     scene.render.resolution_pct = 100
     try:
         scene.view_settings.view_transform = 'AgX'
-        scene.view_settings.look = 'Medium High Contrast'
+        scene.view_settings.look = 'AgX - Medium High Contrast'
     except Exception:
-        pass
+        try:
+            scene.view_settings.look = 'Medium High Contrast'
+        except Exception:
+            pass
 
 
 def render_stills(cams):

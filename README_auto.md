@@ -73,13 +73,23 @@ blender -b -noaudio car_realistic.blend -P turntable.py
 
 | Материал | Суть |
 |----------|------|
-| `CarPaint_MetallicBlue` | (0.055, 0.115, 0.280), Metallic 0.62, Roughness 0.26, Coat 1.0/0.03 |
-| `Glass_Window` | Transparent + Glossy по Layer Weight (без Transmission), тонировка 0.58, Roughness 0.065 |
+| `CarPaint_MetallicBlue` | (0.055, 0.115, 0.280), Metallic 0.62, Roughness 0.26, Coat 1.0/0.03; хлопья металлика через Bump+Noise (Scale=2400), переменная Coat Roughness через ValToRGB |
+| `Glass_Window` | Transparent + Glossy с мультипликативным смешиванием Fac через Math MULTIPLY_ADD + Fresnel (без Transmission) |
 | `Lens_Clear` | Transparent + Glossy по Fresnel (IOR 1.52) — фары и фонари |
 | `Rubber_Tire` | Протектор по UV: checker 150/13, волна 5.5, маска зон, зерно боковины |
-| `Leather_Seat` | Зерно (scale 9.0) + прострочка, цвет (0.042, 0.038, 0.037) |
+| `Leather_Seat` | Зерно (scale 9.0) + прострочка, цвет (0.042, 0.038, 0.037), Bump от Noise (Strength=0.14) |
 | `Carpet` / `Headliner_Fabric` | тот же шейдер кожи, масштаб 42 / 55 |
 | Эмиссия фар / ДХО / габаритов | 0.55 / 0.22 / 0.16 (приглушена, чтобы не светились «лампочками») |
+
+Новые материалы (идеи из `volvo_s90_car_build.py`):
+`chrome` (Metallic=1.0, Rough=0.035), `alu` (Metallic=1.0, Rough=0.22),
+`steel` (Metallic=1.0, Rough=0.42), `disc` (тормозной диск, Rough=0.55),
+`caliper` (суппорт, красный), `liner` (подкрылок, Rough=0.78),
+`badge` / `badge_r` (эмблемы), `screen` (эмиссия экрана),
+`leather_acc` (акцентная кожа, scale=320), `plastic` (интерьер),
+`soft` (мягкий пластик панели, scale=420), `plate` (номерной знак),
+`mirror` (зеркало, Rough=0.02), `gunmetal` (диск колёса, Rough=0.30),
+`gloss_black` (глянцевый чёрный), `carbon` (углепластик, Checker через UV).
 
 Файловые карты (`bake_maps.py`, сохраняются в `maps/`):
 `normal_body.png`, `roughness_body.png`, `ao_body.png`, `normal_tire.png`,
@@ -88,6 +98,17 @@ blender -b -noaudio car_realistic.blend -P turntable.py
 существуют; иначе работают чисто процедурные fallback-ноды. Карты нужны
 обязательно для экспорта в UE — процедурные ноды Blender не переносятся
 как текстуры.
+
+## Свет и рендер
+
+* Студия: 5 Area-ламп с цветами (тёплый ключевой свет, холодный задний/contre-jour) + циклорама
+* Интерьер: Int_RoofLight_F (3.4 Вт), Int_RoofLight_M (3.8 Вт), Int_SeatLight (2.6 Вт), Int_DashLight (1.2 Вт), Int_Ceiling (1.8 Вт) — тёплый белый (1.0, 0.96, 0.90)
+* Мир: HDRI `hdri/studio_small_09.hdr` или градиентный фон EASING (ValToRGB) если файла нет
+* Камеры: совпадают с настройками из volvo_s90_car_build.py
+* Рендер: Cycles CPU, 48 spp, AgX Medium High Contrast, 1440×810;
+  max_bounces=8, transmission_bounces=6, glossy_bounces=4,
+  caustics=False, sample_clamp_indirect=6.0,
+  transparent_max_bounces=48, blur_glossy=2.0 (обязательны — иначе муар)
 
 UV: `uv_top()` для кузова (u = X, v = Y), `uv_cyl()` для колёс (u = угол
 вокруг оси Y, v = по ширине).
