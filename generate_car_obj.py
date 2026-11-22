@@ -19,10 +19,10 @@ ROOT = Path(__file__).resolve().parent
 OUT_OBJ = ROOT / 'exports' / 'car_ue.obj'
 OUT_MTL = ROOT / 'exports' / 'car_ue.mtl'
 
-# ---------- параметры автомобиля (седан, 約 4.9 м) ----------
-L = 4.90   # длина
-W = 1.87   # ширина
-H = 1.47   # высота
+# ---------- параметры автомобиля (седан, ≈ 5.0 м) ----------
+L = 5.00   # длина
+W = 1.872  # ширина
+H = 1.456  # высота
 WB = 2.95  # колёсная база
 RW = 0.34  # радиус колёса
 TW = 0.22  # ширина шины
@@ -33,22 +33,22 @@ def section(u):
     # профиль сечения: верхняя линия, боковые, низ
     # упрощённо: полуовальная cabine + плоский низ
     pts = []
-    # низ: от левого к правому по y
+    # низ: от левого к правому по y (колесные арки внизу)
     for t in np.linspace(0, 1, 25):
         ang = math.pi * t
-        pts.append((0.0, -W * 0.5 * math.sin(ang), 0.12 + 0.06 * (1 - math.cos(ang))))
-    # боковые вверх до пояса
+        pts.append((0.0, -W * 0.5 * math.sin(ang), 0.15 + 0.08 * (1 - math.cos(ang))))
+    # боковые вверх до пояса (пояс на высоте ~0.85*H)
     for t in np.linspace(0, 1, 12):
-        pts.append((0.0, W * 0.5 * (1 - t), 0.12 + 0.75 * H * t))
-    # крыша: от правого пояса к левому
-    roof_drop = 0.15 * H * (1 - abs(2 * u - 1) ** 0.6)  # купе-подобный скос к корме
+        pts.append((0.0, W * 0.5 * (1 - t), 0.15 + 0.85 * H * t))
+    # крыша: от правого пояса к левому (на pleine высоте H)
+    roof_drop = 0.12 * H * (1 - abs(2 * u - 1) ** 0.6)  # легкий скос к корме
     for t in np.linspace(0, 1, 14):
         yy = W * 0.5 * (1 - t)
-        zz = 0.12 + 0.75 * H - roof_drop * t
+        zz = 0.15 + 0.85 * H - roof_drop * t
         pts.append((0.0, yy, zz))
     # левая сторона вниз
     for t in np.linspace(0, 1, 12):
-        pts.append((0.0, -W * 0.5 * t, 0.12 + 0.75 * H * (1 - t)))
+        pts.append((0.0, -W * 0.5 * t, 0.15 + 0.85 * H * (1 - t)))
     return pts
 
 def loft_body(n_slices=40):
@@ -167,12 +167,12 @@ def main():
         # диск отдельным материалом — перекрасим грани диска
         # (в этом упрощённом генераторе диск входит в Wheel_Disc)
 
-    # стёкла (лобовое, боковые, задние)
+    # стёкла (лобовое, задние — внутри габаритов кузова)
     # лобовое
-    gv, gf = glass(0.0, 0.0, 1.05, L * 0.55, 0.05, 0.55, 'Glazing')
+    gv, gf = glass(0.0, 0.0, 1.05, L * 0.50, 0.05, 0.55, 'Glazing')
     add(gv, gf, 'Glazing')
-    # задние
-    gv, gf = glass(L / 2 + 0.1, 0.0, 1.0, L * 0.35, 0.05, 0.5, 'Glazing')
+    # задние (внутри кузова, не выходят за габариты)
+    gv, gf = glass(L / 2 - 0.25, 0.0, 1.02, 0.5, 0.05, 0.5, 'Glazing')
     add(gv, gf, 'Glazing')
 
     # салон упрощённо (панель + сиденья) — группы Interior_* для cockpit рендера
@@ -195,10 +195,10 @@ def main():
         lines.append(f'v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f}')
     lines.append('')
     cur_mat = None
-    cur_group = 'Body'
     for (ia, ib, ic, mat) in all_faces:
         if mat != cur_mat:
             cur_mat = mat
+            lines.append(f'o {cur_mat}')
             lines.append(f'usemtl {cur_mat}')
         lines.append(f'f {ia+1} {ib+1} {ic+1}')
     OUT_OBJ.write_text('\n'.join(lines) + '\n')
