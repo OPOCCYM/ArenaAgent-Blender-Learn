@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.blend
+*.blend1
+renders/
+exports/
+hdri/
+ref/
+.hdri_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
