@@ -26,7 +26,7 @@ import sys
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent
 OBJ = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT / 'exports' / 'car_ue.obj'
 OUT = ROOT / 'renders'
 W, H = 1280, 960
