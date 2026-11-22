@@ -14,6 +14,7 @@
 | `turntable.py` | облёт 360°, 241 кадр → `turntable.mp4` |
 | `silhouette.py` | сверка силуэта с эталоном (заглушка, ждёт `ref/`) |
 | `export_ue.py` | экспорт в FBX для Unreal Engine (масштаб 100, UCX_ коллизии, UV, имена) |
+| `ue_preview_export.py` | предварительные рендеры 5 кадров + экспорт FBX за один запуск |
 | `README_auto.md` | эта документация |
 
 ## Требования
@@ -138,7 +139,11 @@ blender -b -noaudio -P car_build.py
 # 2. проверить геометрию (должны быть везде нули)
 blender -b -noaudio car_realistic.blend -P qa.py
 
-# 3. экспортировать FBX под UE
+# 3. предварительные рендеры 5 кадров + экспорт FBX под UE (за один запуск)
+blender -b -noaudio car_realistic.blend -P ue_preview_export.py
+
+# (альтернативно по отдельности:)
+blender -b -noaudio car_realistic.blend -P render_stills.py
 blender -b -noaudio car_realistic.blend -P export_ue.py
 ```
 
