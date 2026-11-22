@@ -299,15 +299,18 @@ def greenhouse_mask(x, transition=0.05):
 
 
 def upper_side_yz(x, t):
-    """Внешняя координата (y, z) наклонной боковины остекления/стойки (t=0 пояс, t=1 крыша)."""
+    """Внешняя координата (y, z) наклонной боковины остекления/стойки (t=0 пояс, t=1 крыша).
+    Использует высоту и полуширину линии крыши (clamp к [ROOF_X_REAR, ROOF_X_FRONT]),
+    благодаря чему стойки A/C, рамки дверей и стёкла идут по единой ровной дуге без прогиба."""
     t = clamp(t, 0.0, 1.0)
+    x_roof = clamp(x, ROOF_X_REAR, ROOF_X_FRONT)
     w_bot = side_surface_y(x, BELT(x))
-    w_top = WR(x)
+    w_top = WR(x_roof)
     # Плавная купеобразная выпуклость бокового стекла/стойки (tumblehome S90)
-    y = w_bot * (1.0 - t) + w_top * t + 0.026 * math.sin(math.pi * t)
+    y = w_bot * (1.0 - t) + w_top * t + 0.022 * math.sin(math.pi * t)
     z_bot = BELT(x)
-    z_top = ZR(x) - 0.016
-    z = z_bot + (z_top - z_bot) * t
+    z_top = ZR(x_roof) - 0.016
+    z = z_bot + (z_top - z_bot) * t + 0.012 * math.sin(math.pi * t)
     return y, z
 
 

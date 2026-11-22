@@ -1573,30 +1573,35 @@ def build_roof_and_pillars(body_ob, mats, collection):
 
     # 2. Несущие стойки кузова A, B, C (левый и правый борт, фастбэк-силуэт Volvo S90)
     for label, side in (('L', 1.0), ('R', -1.0)):
-        # 2a. Стойка A: длинный спортивный наклон (~31°) вдоль лобового стекла в крышу
+        # 2a. Стойка A: ровная спортивная стойка вдоль лобового стекла в крышу,
+        # строго согласованная с передней наклонной рамкой двери Door_Front по upper_side_yz
         bm_a = bmesh.new()
         xa_bot = CABIN_CUT_X_FRONT + 0.045
         y_a_sill = side_surface_y(xa_bot, CABIN_SILL_Z + 0.015)
-        y_a_jamb = side_surface_y(xa_bot, 0.62)
+        y_a_mid = side_surface_y(xa_bot, 0.58)
+        z_a_belt = BELT(WINDSHIELD_X_BOT)
+        y_a_belt = side_surface_y(WINDSHIELD_X_BOT, z_a_belt)
         st_a = [
-            (CABIN_CUT_X_FRONT - 0.005, xa_bot + 0.04, y_a_sill - 0.115, y_a_sill - 0.068,
+            (CABIN_CUT_X_FRONT - 0.008, xa_bot + 0.036, y_a_sill - 0.115, y_a_sill - 0.068,
              CABIN_SILL_Z + 0.015),
-            (CABIN_CUT_X_FRONT - 0.005, xa_bot + 0.04, y_a_jamb - 0.105, y_a_jamb - 0.048,
-             0.62),
+            (CABIN_CUT_X_FRONT - 0.008, xa_bot + 0.036, y_a_mid - 0.105, y_a_mid - 0.056,
+             0.58),
+            (WINDSHIELD_X_BOT - 0.072, WINDSHIELD_X_BOT + 0.014,
+             y_a_belt - 0.092, y_a_belt - 0.022, z_a_belt - 0.026),
         ]
         for step in range(8):
             t = step / 7.0
-            x_center = (WINDSHIELD_X_BOT - 0.04) * (1.0 - t) + (ROOF_X_FRONT + 0.01) * t
-            half_x = 0.050 * (1.0 - 0.24 * t)
-            y_out, z_val = upper_side_yz(x_center, t)
-            if step == 0:
-                y_out -= 0.018
-            elif step == 7:
-                y_out = WR(x_center) + 0.004
-                z_val = ZR(x_center) - 0.018
-            thick_y = 0.060 * (1.0 - 0.18 * t)
-            st_a.append((x_center - half_x, x_center + half_x,
-                         y_out - thick_y, y_out, z_val))
+            x_front_a = (WINDSHIELD_X_BOT + 0.014) * (1.0 - t) + (ROOF_X_FRONT + 0.022) * t
+            x_back_a = (WINDSHIELD_X_BOT - 0.072) * (1.0 - t) + (ROOF_X_FRONT - 0.032) * t
+            x_mid = 0.5 * (x_front_a + x_back_a)
+            y_out, z_val = upper_side_yz(x_mid, t)
+            if step == 7:
+                y_out = WR(ROOF_X_FRONT) + 0.004
+                z_val = ZR(ROOF_X_FRONT) - 0.016
+            else:
+                y_out += 0.004
+            thick_y = 0.058 * (1.0 - 0.16 * t)
+            st_a.append((x_back_a, x_front_a, y_out - thick_y, y_out, z_val))
         _add_station_beam(bm_a, st_a, side=side)
         pa = bmesh_to_object(f'Pillar_A_{label}', bm_a, material=mats['paint'],
                              smooth=True, collection=collection, auto_smooth_deg=55.0,
@@ -1607,26 +1612,30 @@ def build_roof_and_pillars(body_ob, mats, collection):
         objs.append(pa)
 
         # 2b. Центральная стойка B: изящная глянцево-чёрная стойка в зоне окон;
-        # ниже подоконной линии утоплена внутрь проёма (не просвечивает сквозь закрытые двери)
+        # ниже подоконной линии утоплена по локальному side_surface_y (не выступает из порога)
         bm_b = bmesh.new()
+        yb_sill = side_surface_y(PILLAR_B_X, CABIN_SILL_Z + 0.015)
         yb_jamb = side_surface_y(PILLAR_B_X, 0.62)
+        yb_belt = side_surface_y(PILLAR_B_X, BELT(PILLAR_B_X) - 0.025)
         st_b = [
-            (PILLAR_B_X - PILLAR_B_HALF_X * 0.85, PILLAR_B_X + PILLAR_B_HALF_X * 0.85,
-             yb_jamb - 0.11, yb_jamb - 0.048, CABIN_SILL_Z + 0.015),
-            (PILLAR_B_X - PILLAR_B_HALF_X * 0.85, PILLAR_B_X + PILLAR_B_HALF_X * 0.85,
-             yb_jamb - 0.10, yb_jamb - 0.046, BELT(PILLAR_B_X) - 0.02),
+            (PILLAR_B_X - PILLAR_B_HALF_X * 1.15, PILLAR_B_X + PILLAR_B_HALF_X * 1.15,
+             yb_sill - 0.115, yb_sill - 0.068, CABIN_SILL_Z + 0.015),
+            (PILLAR_B_X - PILLAR_B_HALF_X * 1.25, PILLAR_B_X + PILLAR_B_HALF_X * 1.25,
+             yb_jamb - 0.110, yb_jamb - 0.052, 0.62),
+            (PILLAR_B_X - PILLAR_B_HALF_X * 1.25, PILLAR_B_X + PILLAR_B_HALF_X * 1.25,
+             yb_belt - 0.105, yb_belt - 0.048, BELT(PILLAR_B_X) - 0.025),
         ]
         for step in range(7):
             t = step / 6.0
-            half_x = PILLAR_B_HALF_X * (1.0 - 0.14 * t)
+            half_x = PILLAR_B_HALF_X * (1.0 - 0.12 * t)
             y_out, z_val = upper_side_yz(PILLAR_B_X, t)
             if step == 0:
-                y_out -= 0.036
+                y_out -= 0.002
             elif step == 6:
                 y_out = WR(PILLAR_B_X) + 0.004
-                z_val = ZR(PILLAR_B_X) - 0.018
+                z_val = ZR(PILLAR_B_X) - 0.016
             else:
-                y_out -= 0.003
+                y_out += 0.003
             thick_y = 0.052 * (1.0 - 0.18 * t)
             st_b.append((PILLAR_B_X - half_x, PILLAR_B_X + half_x,
                          y_out - thick_y, y_out, z_val))
@@ -1645,9 +1654,9 @@ def build_roof_and_pillars(body_ob, mats, collection):
         yc_jamb = side_surface_y(xc_jamb, 0.62)
         st_c = [
             (xc_jamb - 0.08, CABIN_CUT_X_REAR + 0.004,
-             yc_jamb - 0.11, yc_jamb - 0.044, CABIN_SILL_Z + 0.015),
+             yc_jamb - 0.11, yc_jamb - 0.052, CABIN_SILL_Z + 0.015),
             (xc_jamb - 0.12, CABIN_CUT_X_REAR + 0.004,
-             yc_jamb - 0.10, yc_jamb - 0.040, 0.62),
+             yc_jamb - 0.10, yc_jamb - 0.046, 0.62),
         ]
         for step in range(8):
             t = step / 7.0
@@ -1656,10 +1665,12 @@ def build_roof_and_pillars(body_ob, mats, collection):
             x_mid = 0.5 * (x_back + x_front)
             y_out, z_val = upper_side_yz(x_mid, t)
             if step == 0:
-                y_out -= 0.018
+                y_out -= 0.014
             elif step == 7:
-                y_out = WR(x_mid) + 0.004
-                z_val = ZR(x_mid) - 0.018
+                y_out = WR(ROOF_X_REAR) + 0.004
+                z_val = ZR(ROOF_X_REAR) - 0.016
+            else:
+                y_out += 0.004
             thick_y = 0.064 * (1.0 - 0.18 * t)
             st_c.append((x_back, x_front, y_out - thick_y, y_out, z_val))
         _add_station_beam(bm_c, st_c, side=side)
@@ -1694,39 +1705,39 @@ def build_glass(mats, collection):
             u = i / (nu - 1)
             xc = x_bot * (1.0 - u) + x_top * u
             zc = z_bot * (1.0 - u) + z_top * u + 0.012 * math.sin(math.pi * u)
-            hw = y_bot * (1.0 - u) + y_top * u
+            hw = y_bot * (1.0 - u) + y_top * u + 0.024 * math.sin(math.pi * u)
             row_out = []
             row_in = []
             for j in range(nv):
                 v = -1.0 + 2.0 * j / (nv - 1)
                 y = v * hw
                 bow = bulge_x * (1.0 - v * v)
-                p_out = Vector((xc + bow, y, zc - 0.010 * (v * v)))
+                p_out = Vector((xc + bow, y, zc - 0.008 * (v * v)))
                 row_out.append(p_out)
                 row_in.append(p_out - n_xz * thickness)
             outer_pts.append(row_out)
             inner_pts.append(row_in)
         _add_thick_grid(bm, outer_pts, inner_pts)
 
-    # Лобовое стекло (между стойками A, от основания у капота до передней кромки крыши)
+    # Лобовое стекло (между стойками A, боковые края заходят в паз Pillar_A без зазора)
     _add_curved_pane(
         x_bot=WINDSHIELD_X_BOT,
         z_bot=BELT(WINDSHIELD_X_BOT) + 0.004,
-        y_bot=side_surface_y(WINDSHIELD_X_BOT, BELT(WINDSHIELD_X_BOT)) * 0.96,
+        y_bot=side_surface_y(WINDSHIELD_X_BOT, BELT(WINDSHIELD_X_BOT)) * 0.98,
         x_top=ROOF_X_FRONT + 0.012,
         z_top=ZR(ROOF_X_FRONT) - 0.018,
-        y_top=WR(ROOF_X_FRONT) * 0.94,
+        y_top=WR(ROOF_X_FRONT) * 0.98,
         bulge_x=+0.024,
     )
 
-    # Заднее стекло (между стойками C, от задней полки перед багажником до кромки крыши)
+    # Заднее стекло (между стойками C, боковые края заходят в паз Pillar_C без зазора)
     _add_curved_pane(
         x_bot=REAR_GLASS_X_BOT,
         z_bot=BELT(REAR_GLASS_X_BOT) + 0.024,
-        y_bot=side_surface_y(REAR_GLASS_X_BOT, BELT(REAR_GLASS_X_BOT)) * 0.88,
+        y_bot=side_surface_y(REAR_GLASS_X_BOT, BELT(REAR_GLASS_X_BOT)) * 0.95,
         x_top=ROOF_X_REAR - 0.005,
         z_top=ZR(ROOF_X_REAR) - 0.018,
-        y_top=WR(ROOF_X_REAR) * 0.93,
+        y_top=WR(ROOF_X_REAR) * 0.97,
         bulge_x=-0.022,
     )
 
@@ -2109,19 +2120,22 @@ def build_doors(body_ob, mats, collection):
             inner_pts.append(row_in)
         _add_thick_grid(bm, outer_pts, inner_pts)
 
-        # 2. Верхняя оконная рамка двери (повторяет купеобразный наклон стоек A/B/C и крыши)
+        # 2. Верхняя оконная рамка двери (строго параллельна стойкам A/B/C и крыше заподлицо!)
         if is_front:
-            xf_bot, xf_top = x_f, ROOF_X_FRONT + 0.015
-            xb_bot, xb_top = x_b + 0.014, PILLAR_B_X + PILLAR_B_HALF_X + 0.004
+            # Передняя балка рамки идёт строго с зазором ~4 мм позади задней кромки Pillar_A
+            xf_bot, xf_top = WINDSHIELD_X_BOT - 0.086, ROOF_X_FRONT - 0.038
+            xb_bot = PILLAR_B_X + PILLAR_B_HALF_X + 0.012
+            xb_top = PILLAR_B_X + PILLAR_B_HALF_X + 0.008
         else:
-            xf_bot, xf_top = x_f - 0.014, PILLAR_B_X - PILLAR_B_HALF_X - 0.004
-            xb_bot, xb_top = x_b - 0.010, ROOF_X_REAR + 0.060
+            xf_bot = PILLAR_B_X - PILLAR_B_HALF_X - 0.012
+            xf_top = PILLAR_B_X - PILLAR_B_HALF_X - 0.008
+            xb_bot, xb_top = x_b - 0.006, ROOF_X_REAR + 0.062
 
         def _sash_pt(x_val, t_val, y_off=0.0):
             y_abs, z_val = upper_side_yz(x_val, t_val)
             return Vector((x_val - hx, side * (y_abs + y_off) - hinge_y, z_val - hinge_z))
 
-        # Три замкнутые балки оконной рамки (передняя, верхняя, задняя) с зазором 2 мм от полотна
+        # Замкнутая дуга оконной рамки заподлицо с Pillar_A/B/C (наружная грань = y_abs + 0.004)
         frame_w = 0.024
         frame_d = 0.024
 
@@ -2158,16 +2172,17 @@ def build_doors(body_ob, mats, collection):
             bm.faces.new((rings[-1][0], rings[-1][1], rings[-1][2], rings[-1][3]))
 
         # Непрерывная дуга оконной рамки: передняя стойка -> верхняя планка -> задняя стойка
+        # y_off=-0.014: наружная грань рамки (y_abs - 0.002) строго заподлицо со стойками A/B/C
         arch_pts = []
-        for k in range(5):
-            t = 0.03 + 0.94 * (k / 4.0)
-            arch_pts.append(_sash_pt(xf_bot * (1.0 - t) + xf_top * t, t, y_off=-0.010))
+        for k in range(6):
+            t = 0.015 + 0.965 * (k / 5.0)
+            arch_pts.append(_sash_pt(xf_bot * (1.0 - t) + xf_top * t, t, y_off=-0.014))
         for k in range(1, 5):
             u = k / 4.0
-            arch_pts.append(_sash_pt(xf_top * (1.0 - u) + xb_top * u, 0.97, y_off=-0.010))
-        for k in range(1, 5):
-            t = 0.97 - 0.94 * (k / 4.0)
-            arch_pts.append(_sash_pt(xb_bot * (1.0 - t) + xb_top * t, t, y_off=-0.010))
+            arch_pts.append(_sash_pt(xf_top * (1.0 - u) + xb_top * u, 0.98, y_off=-0.014))
+        for k in range(1, 6):
+            t = 0.98 - 0.965 * (k / 5.0)
+            arch_pts.append(_sash_pt(xb_bot * (1.0 - t) + xb_top * t, t, y_off=-0.014))
         _add_sash_bar(arch_pts)
 
         door_ob = bmesh_to_object(name, bm, material=mats['paint'],
@@ -2179,24 +2194,24 @@ def build_doors(body_ob, mats, collection):
         door_ob.matrix_parent_inverse = body_ob.matrix_world.inverted()
         door_objs.append(door_ob)
 
-        # 3. Боковое стекло двери (Door_Glass_*), привязано к двери — открывается вместе с ней
+        # 3. Боковое стекло двери (Door_Glass_*), заходит в паз оконной рамки со всех 4 сторон
         bm_gl = bmesh.new()
         g_out = []
         g_in = []
-        nu_g, nv_g = 6, 6
+        nu_g, nv_g = 7, 7
         g_thick = 0.005
         for j in range(nv_g):
-            t = 0.04 + 0.90 * (j / (nv_g - 1))
-            xf_t = xf_bot * (1.0 - t) + xf_top * t - 0.014
-            xb_t = xb_bot * (1.0 - t) + xb_top * t + 0.014
+            t = 0.01 + 0.965 * (j / (nv_g - 1))
+            xf_t = xf_bot * (1.0 - t) + xf_top * t - 0.004
+            xb_t = xb_bot * (1.0 - t) + xb_top * t + 0.004
             row_o = []
             row_i = []
             for i in range(nu_g):
                 u = i / (nu_g - 1)
                 x_g = xf_t * (1.0 - u) + xb_t * u
                 y_abs, z_g = upper_side_yz(x_g, t)
-                y_o = side * (y_abs - 0.006) - hinge_y
-                y_i = side * (y_abs - 0.006 - g_thick) - hinge_y
+                y_o = side * (y_abs - 0.012) - hinge_y
+                y_i = side * (y_abs - 0.012 - g_thick) - hinge_y
                 row_o.append(Vector((x_g - hx, y_o, z_g - hinge_z)))
                 row_i.append(Vector((x_g - hx, y_i, z_g - hinge_z)))
             g_out.append(row_o)
@@ -2210,11 +2225,11 @@ def build_doors(body_ob, mats, collection):
         dg_ob.parent = door_ob
         dg_ob.location = Vector((0.0, 0.0, 0.0))
 
-        # 4. Две дверные петли на стойке A / B (верхняя и нижняя)
+        # 4. Две дверные петли внутри проёма на стойке A / B (скрыты при закрытой двери!)
         bm_dh = bmesh.new()
         for hz_pin in (0.42, 0.78):
-            _add_z_cylinder(bm_dh, 0.010, hz_pin - 0.028, hz_pin + 0.028,
-                            seg=12, center_xy=(hx + 0.006, hinge_y - side * 0.026))
+            _add_z_cylinder(bm_dh, 0.009, hz_pin - 0.026, hz_pin + 0.026,
+                            seg=12, center_xy=(hx - 0.004, hinge_y - side * 0.056))
         hinge_name = name.replace('Door_', 'Door_Hinge_')
         dh_ob = bmesh_to_object(hinge_name, bm_dh, material=mats['carbon'],
                                 smooth=True, collection=collection)
