@@ -46,6 +46,12 @@ Ka 0.02 0.02 0.02
 Ks 0.100 0.100 0.100
 Ns 760
 
+newmtl Wheelwell_Liner
+Kd 0.02800 0.03400 0.04200
+Ka 0.02 0.02 0.02
+Ks 0.020 0.020 0.020
+Ns 220
+
 newmtl Cabin_Charcoal
 Kd 0.12000 0.13000 0.14500
 Ka 0.02 0.02 0.02
@@ -63,3 +69,27 @@ Kd 0.04500 0.28000 0.42000
 Ka 0.02 0.02 0.02
 Ks 0.180 0.180 0.180
 Ns 799
+
+newmtl Powertrain_Aluminium
+Kd 0.22000 0.24000 0.25000
+Ka 0.02 0.02 0.02
+Ks 0.680 0.680 0.680
+Ns 659
+
+newmtl Powertrain_Metal
+Kd 0.52000 0.55000 0.58000
+Ka 0.02 0.02 0.02
+Ks 0.780 0.780 0.780
+Ns 760
+
+newmtl Powertrain_Cover
+Kd 0.05500 0.06500 0.07500
+Ka 0.02 0.02 0.02
+Ks 0.120 0.120 0.120
+Ns 580
+
+newmtl Powertrain_Battery
+Kd 0.10000 0.12000 0.13000
+Ka 0.02 0.02 0.02
+Ks 0.060 0.060 0.060
+Ns 520

@@ -23,7 +23,7 @@ const PORT=4179;
 const SAMPLES=Number(process.env.GR86_CYCLES_SAMPLES||64);
 const WIDTH=Number(process.env.GR86_CYCLES_WIDTH||800);
 const HEIGHT=Number(process.env.GR86_CYCLES_HEIGHT||550);
-const ALL_SHOTS=[['front_3_4','Cam_Exterior'],['side','Cam_Side'],['rear_3_4','Cam_Rear'],['cockpit','Cam_Cockpit'],['panels_open','Cam_Exterior']];
+const ALL_SHOTS=[['front_3_4','Cam_Exterior'],['side','Cam_Side'],['rear_3_4','Cam_Rear'],['cockpit','Cam_Cockpit'],['panels_open','Cam_Side']];
 const requested=process.env.GR86_CYCLES_SHOT?.split(',').map(x=>x.trim()).filter(Boolean);
 const SHOTS=requested?ALL_SHOTS.filter(([slug])=>requested.includes(slug)):ALL_SHOTS.filter(([slug])=>slug!=='panels_open');
 if(!SHOTS.length||requested&&SHOTS.length!==requested.length)throw new Error(`Unknown GR86_CYCLES_SHOT: ${requested}`);
@@ -110,10 +110,10 @@ os.makedirs('/out/cycles',exist_ok=True)`;
 const RENDER_LOOP=`import math
 for slug,cam in [${pyShots}]:
  if slug=='panels_open':
-  bpy.data.objects['Hinge_Hood'].rotation_euler[1]=math.radians(38)
-  bpy.data.objects['Hinge_Trunk'].rotation_euler[1]=math.radians(-34)
-  bpy.data.objects['Hinge_Door_L'].rotation_euler[2]=math.radians(48)
-  bpy.data.objects['Hinge_Door_R'].rotation_euler[2]=math.radians(-48)
+  bpy.data.objects['Hinge_Hood'].rotation_euler[1]=math.radians(48)
+  bpy.data.objects['Hinge_Trunk'].rotation_euler[1]=math.radians(-43)
+  bpy.data.objects['Hinge_Door_L'].rotation_euler[2]=math.radians(72)
+  bpy.data.objects['Hinge_Door_R'].rotation_euler[2]=math.radians(-72)
   bpy.context.view_layer.update()
  s.camera=bpy.data.objects[cam]; s.render.filepath='/out/cycles/gr86_'+slug+'.bmp'
  bpy.ops.render.render(write_still=True); print('CYCLES_FRAME',slug)`;

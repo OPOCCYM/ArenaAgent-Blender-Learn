@@ -24,6 +24,12 @@ for panel,hinge in (('Hood_Panel','Hinge_Hood'),('Trunk_Lid','Hinge_Trunk'),('Do
     assert ob.matrix_world.translation.length<1e-5, f'{panel} moved away from its body rest position'
 roof=bpy.data.objects['Roof_Panel']
 assert roof.dimensions.x>.7 and roof.dimensions.y>1.0 and roof.dimensions.z>.02, roof.dimensions[:]
+for side in ('1','-1'):
+    hinge=bpy.data.objects[f'Hinge_Door_{"L" if side=="1" else "R"}']
+    for component in ('Door_Card','Door_Armrest','Door_Release','Door_Speaker'):
+        assert bpy.data.objects[f'{component}_{side}'].parent==hinge, f'{component} must move with its door'
+for name in ('Engine_Block','Cylinder_Head_L','Cylinder_Head_R','Intake_Plenum','Radiator_Core','Battery_Box','Strut_Brace_EngineBay'):
+    assert bpy.data.objects.get(name) and bpy.data.objects[name].type=='MESH', f'missing engine-bay part: {name}'
 assert all(any(o.name.startswith(prefix) for o in scene.objects) for prefix in ('A_Pillar_','B_Pillar_','C_Pillar_')), 'painted glazing pillars missing'
 for name in ('Windscreen_Glass','Backlight_Glass','Front_Door_Glass_+1','Rear_Quarter_Glass_+1'):
     pane=bpy.data.objects.get(name)

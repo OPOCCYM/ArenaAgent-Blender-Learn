@@ -272,6 +272,68 @@ def build_parametric_shell():
             grid.append(row)
         pane(name+'_Glass',grid)
     shell['reference_status']='Proportional draft; verify against GR86 orthographic references'
+    # Pressed arch lips and inner wheelhouse liners make the fender openings read as
+    # formed sheet metal rather than a bare cut through the parametric shell.
+    paint=bpy.data.materials.get('Pearl_White')
+    liner=material('Wheelwell_Liner',(.028,.034,.042),.02,.78)
+    for axle,cx in [('Front',-1.2875),('Rear',1.2875)]:
+        for side,letter in [(-1,'R'),(1,'L')]:
+            verts=[]; faces=[]; steps=40
+            for radius in (.392,.407):
+                for i in range(steps+1):
+                    a=math.pi*i/steps
+                    x=cx+radius*math.cos(a); z=.337+radius*math.sin(a)
+                    # Follow the fender outer cross-section: lower arch starts near
+                    # the rocker, and the crown reaches the upper wheel-arch shoulder.
+                    lateral=.80+.173*math.sin(a)
+                    y=side*(smooth_curve(CURVES['width'],x)*lateral+.002)
+                    verts.append((x,y,z))
+            for i in range(steps): faces.append((i,i+1,steps+2+i,steps+1+i))
+            me=bpy.data.meshes.new(f'Arch_Lip_{axle}_{letter}_Mesh'); me.from_pydata(verts,[],faces); me.update()
+            me.materials.append(paint); lip=bpy.data.objects.new(f'Arch_Lip_{axle}_{letter}',me)
+            bpy.data.collections['GR86_Model'].objects.link(lip)
+            for p in me.polygons: p.use_smooth=True
+            solid=lip.modifiers.new('Rolled wheel-arch return','SOLIDIFY'); solid.thickness=.003
+            bevel=lip.modifiers.new('Arch lip edge','BEVEL'); bevel.width=.0015; bevel.segments=2
+            # Full-width dark arch inner surface closes the wheelhouse cavity behind the tire.
+            lv=[]; lf=[]
+            for y in (.51,.82):
+                for i in range(steps+1):
+                    a=math.pi*i/steps
+                    lv.append((cx+.392*math.cos(a),side*y,.337+.392*math.sin(a)))
+            for i in range(steps): lf.append((i,i+1,steps+2+i,steps+1+i))
+            lm=bpy.data.meshes.new(f'Wheelhouse_{axle}_{letter}_Mesh'); lm.from_pydata(lv,[],lf); lm.update()
+            lm.materials.append(liner); well=bpy.data.objects.new(f'Wheelhouse_Liner_{axle}_{letter}',lm)
+            bpy.data.collections['GR86_Model'].objects.link(well)
+            for p in lm.polygons: p.use_smooth=True
+    # Subtle stamped character beads: paired hood crowns and a shoulder break on each door.
+    for side,letter in [(-1,'R'),(1,'L')]:
+        verts=[]; faces=[]; count=32
+        for i in range(count+1):
+            x=-1.84+(.78*i/count); w=smooth_curve(CURVES['width'],x)
+            belt=smooth_curve(CURVES['belt'],x); top=smooth_curve(CURVES['top'],x)
+            y0=side*.315; q=min(1,abs(y0)/max(.01,w))
+            z=top+(belt-top)*q*q+.004
+            for dy in (-.009,.009): verts.append((x,y0+dy,z))
+        for i in range(count): faces.append((2*i,2*i+1,2*i+3,2*i+2))
+        me=bpy.data.meshes.new(f'Hood_Crease_{letter}_Mesh'); me.from_pydata(verts,[],faces); me.update()
+        me.materials.append(paint); ob=bpy.data.objects.new(f'Hood_Crease_{letter}',me)
+        bpy.data.collections['GR86_Model'].objects.link(ob)
+        for p in me.polygons: p.use_smooth=True
+        sol=ob.modifiers.new('Pressed hood crown','SOLIDIFY'); sol.thickness=.002
+        dverts=[]; dfaces=[]
+        for i in range(count+1):
+            x=-.54+1.08*i/count; w=smooth_curve(CURVES['width'],x)
+            # Door skin shoulder bead, offset just outside the curved side panel.
+            z=.665+.018*math.sin(math.pi*i/count)
+            y=side*(w*.986+.012)
+            dverts.extend([(x,y-side*.006,z),(x,y+side*.006,z)])
+        for i in range(count): dfaces.append((2*i,2*i+1,2*i+3,2*i+2))
+        dm=bpy.data.meshes.new(f'Door_Crease_{letter}_Mesh'); dm.from_pydata(dverts,[],dfaces); dm.update()
+        dm.materials.append(paint); doorline=bpy.data.objects.new(f'Door_Crease_{letter}',dm)
+        bpy.data.collections['GR86_Model'].objects.link(doorline)
+        for p in dm.polygons: p.use_smooth=True
+        edge=doorline.modifiers.new('Door character ridge','SOLIDIFY'); edge.thickness=.002
     return shell
 
 def build_interior(vehicle):
@@ -302,8 +364,16 @@ def build_interior(vehicle):
         back.rotation_euler[1]=math.radians(10)
         headrest=box(f'Front_Seat_Headrest_{side}',(.48,side*.31,1.17),(.12,.22,.075),leather,.035)
         headrest.rotation_euler[1]=math.radians(10)
-        box(f'Door_Card_{side}',(.22,side*.535,.81),(.82,.06,.16),leather,.035)
-        box(f'Door_Armrest_{side}',(.28,side*.505,.875),(.38,.055,.035),trim,.015)
+        # These trimmed surfaces sit on the cabin side of their matching door skins;
+        # they are reparented to the door hinge roots later in scene assembly.
+        box(f'Door_Card_{side}',(.18,side*.785,.715),(.88,.038,.22),leather,.035)
+        box(f'Door_Armrest_{side}',(.27,side*.752,.805),(.40,.052,.035),trim,.015)
+        box(f'Door_Release_{side}',(-.39,side*.758,.805),(.085,.022,.035),trim,.012)
+        bpy.ops.mesh.primitive_torus_add(major_radius=.057,minor_radius=.007,major_segments=24,minor_segments=8,
+                                        location=(.48,side*.755,.66),rotation=(math.pi/2,0,0))
+        speaker=bpy.context.object; speaker.name=f'Door_Speaker_{side}'; speaker.data.materials.append(trim)
+        for c in list(speaker.users_collection): c.objects.unlink(speaker)
+        vehicle.objects.link(speaker)
     bpy.ops.mesh.primitive_torus_add(major_radius=.15,minor_radius=.024,major_segments=32,minor_segments=10,
                                     location=(-.22,-.30,.99),rotation=(0,math.pi/2,0))
     wheel=bpy.context.object; wheel.name='Steering_Wheel'; wheel.data.materials.append(trim)
@@ -315,6 +385,40 @@ def build_interior(vehicle):
         sy=math.sin(angle)*.075; sz=math.cos(angle)*.075
         spoke=box(f'Steering_Spoke_{idx}',(-.22,-.30+sy,.99+sz),(.025,.018,.16),trim,.008)
         spoke.rotation_euler[0]=-angle
+
+
+def build_engine_bay(vehicle):
+    """Add the visible engine-bay hard points exposed by the hood-open review pose."""
+    block_mat=material('Powertrain_Aluminium',(.22,.24,.25),.68,.34)
+    cover_mat=material('Powertrain_Cover',(.055,.065,.075),.12,.42)
+    bright=material('Powertrain_Metal',(.52,.55,.58),.78,.24)
+    battery_mat=material('Powertrain_Battery',(.10,.12,.13),.06,.48)
+    def cube(name,loc,size,mat,bevel=.015):
+        bpy.ops.mesh.primitive_cube_add(size=1,location=loc)
+        ob=bpy.context.object; ob.name=name; ob.dimensions=size
+        bpy.ops.object.transform_apply(location=False,rotation=False,scale=True)
+        ob.data.materials.append(mat)
+        if bevel:
+            m=ob.modifiers.new('Cast edge radii','BEVEL'); m.width=bevel; m.segments=2
+        for c in list(ob.users_collection): c.objects.unlink(ob)
+        vehicle.objects.link(ob)
+        return ob
+    cube('Engine_Block',(-1.35,0,.585),(.48,.52,.25),block_mat,.035)
+    cube('Cylinder_Head_L',(-1.36,.145,.725),(.40,.20,.075),bright,.018)
+    cube('Cylinder_Head_R',(-1.36,-.145,.725),(.40,.20,.075),bright,.018)
+    cube('Intake_Plenum',(-1.17,0,.79),(.25,.40,.095),cover_mat,.028)
+    cube('Radiator_Core',(-1.91,0,.535),(.075,1.02,.32),cover_mat,.012)
+    cube('Battery_Box',(-1.68,.43,.63),(.20,.18,.18),battery_mat,.018)
+    for side in (-1,1):
+        bpy.ops.mesh.primitive_cylinder_add(vertices=32,radius=.093,depth=.06,location=(-1.31,side*.49,.65))
+        tower=bpy.context.object; tower.name=f'Strut_Tower_EngineBay_{side}'
+        tower.data.materials.append(cover_mat)
+        for c in list(tower.users_collection): c.objects.unlink(tower)
+        vehicle.objects.link(tower)
+    bpy.ops.mesh.primitive_cylinder_add(vertices=24,radius=.014,depth=.92,location=(-1.43,0,.735),rotation=(math.pi/2,0,0))
+    brace=bpy.context.object; brace.name='Strut_Brace_EngineBay'; brace.data.materials.append(bright)
+    for c in list(brace.users_collection): c.objects.unlink(brace)
+    vehicle.objects.link(brace)
 
 
 def main():
@@ -352,6 +456,7 @@ def main():
 
     build_parametric_shell()
     build_interior(vehicle)
+    build_engine_bay(vehicle)
     imported=[obj for obj in vehicle.objects]
     rig=bpy.data.collections.new('GR86_Rig'); scene.collection.children.link(rig)
     # Independent transform roots let animators swing panels about plausible hinge axes.
@@ -368,6 +473,12 @@ def main():
         if panel_obj:
             panel_obj.parent=root
             panel_obj.matrix_parent_inverse=root.matrix_world.inverted()
+            if panel.startswith('Door_'):
+                side='1' if panel.endswith('_L') else '-1'
+                for child_name in (f'Door_Card_{side}',f'Door_Armrest_{side}',f'Door_Release_{side}',f'Door_Speaker_{side}'):
+                    child=bpy.data.objects.get(child_name)
+                    if child:
+                        child.parent=root; child.matrix_parent_inverse=root.matrix_world.inverted()
             bpy.context.view_layer.update()
     wheel_roots={}
     for axle,x in [('Front',-1.2875),('Rear',1.2875)]:
