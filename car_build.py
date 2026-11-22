@@ -451,46 +451,63 @@ def mat_floor():
 
 def mat_glass():
     """Glass_Window: тонированное автомобильное стекло с чётким зеркальным отражением
-    по Fresnel (IOR 1.52) и естественной прозрачностью салона."""
+    по Layer Weight и прозрачной внутренней гранью (без артефакта TIR на косых углах)."""
     m = bpy.data.materials.new('Glass_Window')
     m.use_nodes = True
     nt = m.node_tree
     nt.nodes.clear()
     out = nt.nodes.new('ShaderNodeOutputMaterial')
+    geom = nt.nodes.new('ShaderNodeNewGeometry')
+    lw = nt.nodes.new('ShaderNodeLayerWeight')
+    lw.inputs['Blend'].default_value = 0.28
     trans = nt.nodes.new('ShaderNodeBsdfTransparent')
     trans.inputs['Color'].default_value = (0.34, 0.40, 0.44, 1.0)
     gloss = nt.nodes.new('ShaderNodeBsdfGlossy')
     gloss.inputs['Color'].default_value = (0.88, 0.93, 0.98, 1.0)
     gloss.inputs['Roughness'].default_value = 0.016
-    fres = nt.nodes.new('ShaderNodeFresnel')
-    fres.inputs['IOR'].default_value = 1.54
-    mix = nt.nodes.new('ShaderNodeMixShader')
-    nt.links.new(fres.outputs['Fac'], mix.inputs['Fac'])
-    nt.links.new(trans.outputs[0], mix.inputs[1])
-    nt.links.new(gloss.outputs[0], mix.inputs[2])
-    nt.links.new(mix.outputs[0], out.inputs['Surface'])
+    front_mix = nt.nodes.new('ShaderNodeMixShader')
+    nt.links.new(lw.outputs['Fresnel'], front_mix.inputs['Fac'])
+    nt.links.new(trans.outputs[0], front_mix.inputs[1])
+    nt.links.new(gloss.outputs[0], front_mix.inputs[2])
+    # Внутренняя грань стекла чисто прозрачна — исключает ложное полное внутреннее отражение
+    back_mix = nt.nodes.new('ShaderNodeMixShader')
+    nt.links.new(geom.outputs['Backfacing'], back_mix.inputs['Fac'])
+    nt.links.new(front_mix.outputs[0], back_mix.inputs[1])
+    nt.links.new(trans.outputs[0], back_mix.inputs[2])
+    nt.links.new(back_mix.outputs[0], out.inputs['Surface'])
     return m
 
 
 def mat_lens():
-    """Lens_Clear: прозрачный поликарбонат фар и фонарей по Fresnel (IOR 1.54)."""
+    """Lens_Clear: кристально прозрачный поликарбонат фар и фонарей с мягким бликом
+    по Layer Weight и чисто прозрачной внутренней гранью (LED видны под любым углом!)."""
     m = bpy.data.materials.new('Lens_Clear')
     m.use_nodes = True
     nt = m.node_tree
     nt.nodes.clear()
     out = nt.nodes.new('ShaderNodeOutputMaterial')
+    geom = nt.nodes.new('ShaderNodeNewGeometry')
+    lw = nt.nodes.new('ShaderNodeLayerWeight')
+    lw.inputs['Blend'].default_value = 0.14
+    scale_f = nt.nodes.new('ShaderNodeMath')
+    scale_f.operation = 'MULTIPLY'
+    scale_f.inputs[1].default_value = 0.55
     trans = nt.nodes.new('ShaderNodeBsdfTransparent')
-    trans.inputs['Color'].default_value = (0.94, 0.96, 0.98, 1.0)
+    trans.inputs['Color'].default_value = (0.97, 0.98, 0.99, 1.0)
     gloss = nt.nodes.new('ShaderNodeBsdfGlossy')
     gloss.inputs['Color'].default_value = (0.96, 0.98, 1.0, 1.0)
     gloss.inputs['Roughness'].default_value = 0.015
-    fres = nt.nodes.new('ShaderNodeFresnel')
-    fres.inputs['IOR'].default_value = 1.54
-    mix = nt.nodes.new('ShaderNodeMixShader')
-    nt.links.new(fres.outputs['Fac'], mix.inputs['Fac'])
-    nt.links.new(trans.outputs[0], mix.inputs[1])
-    nt.links.new(gloss.outputs[0], mix.inputs[2])
-    nt.links.new(mix.outputs[0], out.inputs['Surface'])
+    front_mix = nt.nodes.new('ShaderNodeMixShader')
+    nt.links.new(lw.outputs['Fresnel'], scale_f.inputs[0])
+    nt.links.new(scale_f.outputs['Value'], front_mix.inputs['Fac'])
+    nt.links.new(trans.outputs[0], front_mix.inputs[1])
+    nt.links.new(gloss.outputs[0], front_mix.inputs[2])
+    # На внутренней (backfacing) грани линзы — чистая прозрачность, без чёрного TIR-зеркала!
+    back_mix = nt.nodes.new('ShaderNodeMixShader')
+    nt.links.new(geom.outputs['Backfacing'], back_mix.inputs['Fac'])
+    nt.links.new(front_mix.outputs[0], back_mix.inputs[1])
+    nt.links.new(trans.outputs[0], back_mix.inputs[2])
+    nt.links.new(back_mix.outputs[0], out.inputs['Surface'])
     return m
 
 
