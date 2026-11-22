@@ -199,7 +199,7 @@ def ZR(x):
             e = u * u * (3.0 - 2.0 * u)
             return z_rf * (1.0 - e) + z_cowl * e
         u = clamp((x - WINDSHIELD_X_BOT) / (X_MAX - WINDSHIELD_X_BOT), 0.0, 1.0)
-        return z_cowl - 0.165 * (u ** 1.45)
+        return z_cowl - 0.195 * (u ** 1.48)
     # Покатое фастбэк заднее стекло (ROOF_X_REAR -> REAR_GLASS_X_BOT) и спортивный багажник S90
     z_rr = 1.404
     z_rdeck = 1.026
@@ -208,19 +208,19 @@ def ZR(x):
         e = u * u * (3.0 - 2.0 * u)
         return z_rr * (1.0 - e) + z_rdeck * e
     u = clamp((REAR_GLASS_X_BOT - x) / (REAR_GLASS_X_BOT - X_MIN), 0.0, 1.0)
-    return z_rdeck - 0.068 * (u ** 1.40)
+    return z_rdeck - 0.072 * (u ** 1.40)
 
 
 def BELT(x):
     """Высокая плечевая линия Volvo S90: уверенно восходящая к корме (~0.98),
-    плавно ниспадающая по длинному капоту к фарам (~0.78 у передней кромки)."""
+    плавно ниспадающая по длинному капоту к фарам (~0.74 у передней кромки)."""
     b = 0.966 - 0.025 * clamp((x + 0.5) / 2.0, -0.8, 1.0)
     if x > WINDSHIELD_X_BOT:
         t = clamp((x - WINDSHIELD_X_BOT) / (X_MAX - WINDSHIELD_X_BOT), 0.0, 1.0)
-        b -= 0.160 * (t ** 1.50)
+        b -= 0.185 * (t ** 1.52)
     elif x < REAR_GLASS_X_BOT:
         t = clamp((REAR_GLASS_X_BOT - x) / (REAR_GLASS_X_BOT - X_MIN), 0.0, 1.0)
-        b -= 0.055 * (t ** 1.55)
+        b -= 0.058 * (t ** 1.55)
     return min(b, ZR(x) - 0.028)
 
 
@@ -364,10 +364,10 @@ def hood_lift_endpoints(open_deg):
 
 def fender_bumper_seam_z(x):
     """Высота наклонного стыка переднего крыла с передним бампером на участке
-    [FRONT_BUMPER_WING_X .. FENDER_X_FRONT]: от передней кромки арки вверх к фаре."""
+    [FRONT_BUMPER_WING_X .. FENDER_X_FRONT]: от передней кромки арки вверх к низу фары."""
     u = clamp((x - FRONT_BUMPER_WING_X) / max(FENDER_X_FRONT - FRONT_BUMPER_WING_X, 0.05),
               0.0, 1.0)
-    return 0.50 + 0.21 * (u ** 0.85)
+    return 0.39 + 0.175 * (u ** 0.85)
 
 
 def fender_bottom_z(x):
@@ -417,11 +417,19 @@ def rear_fender_bottom_z(x):
     return min(z_lo, BELT(x) - 0.05)
 
 
+def front_nose_surface_x(y):
+    """Единая плавная обтекаемая дуга переднего носа X(y) для съёмного переднего бампера,
+    решётки радиатора, фар и передней кромки капота (выпуклая по центру X_MAX - 0.015,
+    плавно скругляется к передним углам крыльев ~2.29)."""
+    u = clamp(abs(y) / 0.78, 0.0, 1.0)
+    return X_MAX - 0.015 - 0.175 * (u ** 2.05)
+
+
 def rear_tail_surface_x(y):
     """Единая плавная дуга заднего торца X(y) для крышки багажника, задних фонарей
-    и верхней кромки заднего бампера (уходит от X_MIN=-2.50 по центру к -2.355 на углах)."""
+    и верхней кромки заднего бампера (уходит от X_MIN=-2.48 по центру к -2.33 на углах)."""
     u = clamp(abs(y) / 0.78, 0.0, 1.0)
-    return X_MIN + 0.020 + 0.125 * (u ** 2.15)
+    return X_MIN + 0.020 + 0.145 * (u ** 2.10)
 
 
 def trunk_bay_mask(x, transition=0.04):

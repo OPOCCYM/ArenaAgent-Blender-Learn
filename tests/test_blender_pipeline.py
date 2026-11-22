@@ -114,8 +114,19 @@ def test_collections_and_bounding_box(built_scene_dir):
         th_ob = bpy.data.objects[th_name]
         th_xs = [(th_ob.matrix_world @ v.co).x for v in th_ob.data.vertices]
         assert (max(th_xs) - min(th_xs)) < 0.14, f'{th_name} слишком глубоко заходит в багажник'
-    # Детали заднего бампера и задних крыльев привязаны к соответствующим съёмным панелям
-    for rb_child in ('Rear_Diffuser', 'Exhaust_L', 'Exhaust_R'):
+    # Оба бампера — отдельные съёмные детали контрастного цвета (отличного от цвета кузова)
+    body_mat = body.data.materials[0].name
+    for bmp_name in ('Front_Bumper', 'Rear_Bumper'):
+        bmp_ob = bpy.data.objects[bmp_name]
+        assert bmp_ob.parent.name == 'Body'
+        assert bmp_ob.data.materials[0].name != body_mat, (
+            f'{bmp_name} должен быть другого цвета, чем кузов'
+        )
+    # Детали переднего и заднего бамперов привязаны к соответствующим съёмным бамперам
+    for fb_child in ('Grille_Front', 'Grille_Chrome', 'Bumper_Intake_Front'):
+        assert bpy.data.objects[fb_child].parent.name == 'Front_Bumper'
+    for rb_child in ('Rear_Diffuser', 'Exhaust_L', 'Exhaust_R',
+                     'Rear_Reflector_L', 'Rear_Reflector_R'):
         assert bpy.data.objects[rb_child].parent.name == 'Rear_Bumper'
     assert bpy.data.objects['Wheel_Arch_RL'].parent.name == 'Fender_Rear_L'
     assert bpy.data.objects['Wheel_Arch_RR'].parent.name == 'Fender_Rear_R'

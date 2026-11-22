@@ -254,8 +254,10 @@ def test_rear_separation_fenders_bumper_taillights_and_trunk():
     # Строгое разделение зон: крышка багажника между фонарями, бампер строго ниже фонарей
     assert TRUNK_TAIL_HALF_Y + 0.015 < TAIL_LIGHT_Y_IN < TAIL_LIGHT_Y_OUT
     assert REAR_BUMPER_TOP_Z + 0.010 < TAIL_LIGHT_Z_LO < TAIL_LIGHT_Z_HI
-    # Дуга заднего торца плавно уходит вперёд к углам кормы
+    # Дуга заднего торца плавно уходит вперёд к углам кормы, а передний нос — назад к углам
+    from car_geometry import front_nose_surface_x
     assert rear_tail_surface_x(0.0) < rear_tail_surface_x(0.45) < rear_tail_surface_x(0.75)
+    assert front_nose_surface_x(0.0) > front_nose_surface_x(0.45) > front_nose_surface_x(0.75)
 
 
 
