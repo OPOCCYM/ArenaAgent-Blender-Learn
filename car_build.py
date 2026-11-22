@@ -705,6 +705,8 @@ def build_interior(mats):
     box(bm, -1.15, -0.30, -0.52, 0.52, 0.34, 0.50)
     box(bm, -1.15, -0.30, -0.52, 0.52, 0.50, 0.92)
     box(bm, -0.95, -0.55, -0.12, 0.12, 0.92, 1.10)              # подголовники дивана
+    # задняя полка / шторка между задними сиденьями и задним стеклом
+    box(bm, -1.42, -1.12, -0.55, 0.55, 0.95, 1.02)
     # центральный тоннель
     box(bm, 1.15, -1.15, -0.14, 0.14, ZB(0.0), 0.62)
     orient_outward(bm)
@@ -837,6 +839,63 @@ def build_interior(mats):
     return objs
 
 
+def build_doors(body_ob, mats):
+    """Четыре двери как отдельные меша с origin в шарнире.
+    Дверь вращается вокруг локальной оси Z (вертикальной, через шарнир).
+    Имена: Door_Front_Left, Door_Front_Right, Door_Rear_Left, Door_Rear_Right.
+    Каждая дверь — тонкая коробка (пластина с толщиной), материал кожи
+    (внутренняя обшивка виднее из салона)."""
+    objs = []
+    door_thickness = 0.035
+    door_height = 0.72
+    hinge_z = 0.75
+
+    doors_spec = [
+        # имя, ось шарнира X, сторону Y, какой конец шарнир, угол открывания
+        ('Door_Front_Left',  0.10, +1.0, 'front',  70.0),
+        ('Door_Front_Right', 0.10, -1.0, 'front', -70.0),
+        ('Door_Rear_Left',  -1.10, +1.0, 'rear',   70.0),
+        ('Door_Rear_Right', -1.10, -1.0, 'rear',  -70.0),
+    ]
+
+    for name, hx, side, hinge_side, open_angle in doors_spec:
+        yc = side * (WHEEL_Y - 0.02)
+        bm = bmesh.new()
+        pts = {}
+        if hinge_side == 'front':
+            x0, x1 = -0.88, 0.0   # дверь простирается назад от шарнира
+        else:
+            x0, x1 = 0.0, 0.88    # дверь простирается вперёд от шарнира
+        for ix, x in enumerate((x0, x1)):
+            for iy, y in enumerate((0.0, door_thickness * side)):
+                for iz, z in enumerate((0.0, door_height)):
+                    pts[(ix, iy, iz)] = bm.verts.new(Vector((x, y, z)))
+
+        def V(i, j, k):
+            return pts[(i, j, k)]
+
+        faces = [
+            (V(0, 0, 0), V(1, 0, 0), V(1, 1, 0), V(0, 1, 0)),
+            (V(0, 0, 1), V(0, 1, 1), V(1, 1, 1), V(1, 0, 1)),
+            (V(0, 0, 0), V(0, 0, 1), V(1, 0, 1), V(1, 0, 0)),
+            (V(1, 1, 0), V(1, 1, 1), V(0, 1, 1), V(0, 1, 0)),
+            (V(0, 0, 0), V(0, 1, 0), V(0, 1, 1), V(0, 0, 1)),
+            (V(1, 0, 1), V(1, 1, 1), V(1, 1, 0), V(1, 0, 0)),
+        ]
+        for f in faces:
+            bm.faces.new(f)
+        orient_outward(bm)
+        ob = bmesh_to_object(name, bm, material=mats['leather'], smooth=True)
+        cleanup(ob, 5e-5)
+        # поставить объект в точку шарнира — origin объекта и есть шарнир,
+        # поэтому вращение rotation_euler.z يدور дверь вокруг шарнира
+        ob.location = Vector((hx, yc, hinge_z))
+        ob.parent = body_ob
+        ob.matrix_parent_inverse = body_ob.matrix_world.inverted()
+        objs.append(ob)
+    return objs
+
+
 # --------------------------------------------------------------------------- #
 # 10. Свет, мир, камеры
 # --------------------------------------------------------------------------- #
@@ -926,7 +985,7 @@ def build_cameras():
 # --------------------------------------------------------------------------- #
 # 11. Анимация
 # --------------------------------------------------------------------------- #
-def animate(wheels, steering, body_ob):
+def animate(wheels, steering, body_ob, door_objs=None):
     scene = bpy.context.scene
     scene.frame_start = 1
     scene.frame_end = 240
@@ -946,6 +1005,16 @@ def animate(wheels, steering, body_ob):
     for frame, val in ((1, 0.0), (60, roll), (120, 0.0), (180, -roll), (240, 0.0)):
         key_linear(body_ob, 'rotation_euler', 0, frame, val)
     linearize(body_ob)
+    # двери: открываются на 45-м кадре, держатся открытыми до 200-го, закрываются к 240-му
+    door_angle = math.radians(70.0)
+    if door_objs:
+        for ob in door_objs:
+            # левые двери открываются в одну сторону, правые — в другую
+            sign = 1.0 if ob.name.endswith('_Left') else -1.0
+            ang = sign * door_angle
+            for frame, val in ((1, 0.0), (45, ang), (200, ang), (240, 0.0)):
+                key_linear(ob, 'rotation_euler', 2, frame, val)
+            linearize(ob)
 
 
 # --------------------------------------------------------------------------- #
@@ -1007,6 +1076,9 @@ def main(argv):
 
     bpy.context.view_layer.update()
 
+    # двери (привязываются к кузову внутри build_doors)
+    door_objs = build_doors(body_ob, mats)
+
     # детали кузова (где ray_cast найдёт поверхность)
     nose_hit, nose_nrm = body_hit(0.0, 0.80, front=True)
     if nose_hit is not None:
@@ -1055,7 +1127,7 @@ def main(argv):
         steering.parent = body_ob
         steering.matrix_parent_inverse = body_ob.matrix_world.inverted()
 
-    animate(wheels, steering, body_ob)
+    animate(wheels, steering, body_ob, door_objs)
 
     # --- имена объектов: UE-стиль (без пробелов/скобок/знаков +-) ---
     import re
