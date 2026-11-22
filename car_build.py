@@ -754,6 +754,56 @@ def mat_bumper():
     return m
 
 
+def mat_wood():
+    """Скандинавский открытопористый шпон Linear Walnut (горизонтальные волокна Volvo S90)."""
+    m = bpy.data.materials.new('Wood_Walnut')
+    m.use_nodes = True
+    nt = m.node_tree
+    bsdf = _bsdf_base(m, (0.14, 0.085, 0.052), 0.02, 0.38, coat=0.20, coat_rough=0.16)
+    tc = nt.nodes.new('ShaderNodeTexCoord')
+    wave = nt.nodes.new('ShaderNodeTexWave')
+    wave.wave_type = 'BANDS'
+    wave.bands_direction = 'Z'
+    wave.inputs['Scale'].default_value = 9.0
+    wave.inputs['Distortion'].default_value = 2.6
+    wave.inputs['Detail'].default_value = 3.5
+    _, fac_in, a_in, b_in, col_out = _new_mix_rgba(nt, blend_type='MIX', fac=0.5)
+    a_in.default_value = (0.088, 0.054, 0.034, 1.0)
+    b_in.default_value = (0.175, 0.112, 0.070, 1.0)
+    bump = nt.nodes.new('ShaderNodeBump')
+    bump.inputs['Strength'].default_value = 0.025
+    bump.inputs['Distance'].default_value = 0.0010
+    nt.links.new(tc.outputs['Object'], wave.inputs['Vector'])
+    nt.links.new(wave.outputs['Fac'], fac_in)
+    nt.links.new(col_out, bsdf.inputs['Base Color'])
+    nt.links.new(wave.outputs['Fac'], bump.inputs['Height'])
+    nt.links.new(bump.outputs['Normal'], bsdf.inputs['Normal'])
+    return m
+
+
+def mat_screen_ui():
+    """OLED-дисплей Volvo Sensus / Digital Cluster: плавный тёмно-сапфировый UI-градиент."""
+    m = bpy.data.materials.new('Screen_Sensus_UI')
+    m.use_nodes = True
+    nt = m.node_tree
+    bsdf = _bsdf_base(m, (0.012, 0.022, 0.042), 0.05, 0.05, coat=1.0, coat_rough=0.02)
+    tc = nt.nodes.new('ShaderNodeTexCoord')
+    sep = nt.nodes.new('ShaderNodeSeparateXYZ')
+    mrange = nt.nodes.new('ShaderNodeMapRange')
+    mrange.inputs['From Min'].default_value = 0.70
+    mrange.inputs['From Max'].default_value = 0.92
+    _, fac_in, a_in, b_in, col_out = _new_mix_rgba(nt, blend_type='MIX', fac=0.5)
+    a_in.default_value = (0.025, 0.075, 0.16, 1.0)
+    b_in.default_value = (0.11, 0.28, 0.48, 1.0)
+    nt.links.new(tc.outputs['Object'], sep.inputs['Vector'])
+    nt.links.new(sep.outputs['Z'], mrange.inputs['Value'])
+    nt.links.new(mrange.outputs['Result'], fac_in)
+    if 'Emission Color' in bsdf.inputs:
+        nt.links.new(col_out, bsdf.inputs['Emission Color'])
+        bsdf.inputs['Emission Strength'].default_value = 1.10
+    return m
+
+
 def make_materials():
     return {
         'paint': mat_paint(),
@@ -761,12 +811,17 @@ def make_materials():
         'glass': mat_glass(),
         'lens': mat_lens(),
         'rubber': mat_rubber(),
-        'leather': mat_leather('Leather_Seat', (0.042, 0.038, 0.037), scale=9.0, roughness=0.62),
+        'leather': mat_leather('Leather_Seat', (0.055, 0.050, 0.048), scale=10.0, roughness=0.56),
+        'leather_light': mat_leather('Leather_Bolster', (0.095, 0.088, 0.082),
+                                     scale=12.0, roughness=0.52),
+        'wood': mat_wood(),
+        'screen_ui': mat_screen_ui(),
         'carpet': mat_leather('Carpet', (0.025, 0.022, 0.020), scale=42.0, roughness=0.85),
-        'headliner': mat_leather('Headliner_Fabric', (0.07, 0.065, 0.06),
+        'headliner': mat_leather('Headliner_Fabric', (0.085, 0.080, 0.075),
                                  scale=55.0, roughness=0.90),
         'headlight': mat_emission('Headlight_Light', 1.4, (1.0, 0.96, 0.88)),
         'drl': mat_emission('DRL_Light', 4.2, (0.94, 0.97, 1.0)),
+        'amber_led': mat_emission('Amber_LED', 3.2, (1.0, 0.42, 0.04)),
         'tail': mat_emission('Tail_Light', 3.4, (1.0, 0.055, 0.045)),
         'tail_housing': mat_tail_housing(),
         'carbon': mat_carbon(),
@@ -1979,75 +2034,99 @@ def build_roof_and_pillars(body_ob, mats, collection):
     sr_ob.matrix_parent_inverse = roof_ob.matrix_world.inverted()
     objs.append(sr_ob)
 
-    # 7. Аэродинамическая антенна «акулий плавник» (Roof_Antenna) на задней части крыши
+    # 7. Аэродинамическая антенна «акулий плавник» (Roof_Antenna): прокладка + 6-секц. гребень
     bm_ant = bmesh.new()
     x_ant = ROOF_X_REAR + 0.16
     z_ant = ZR(x_ant) - 0.004
     ant_specs = [
-        (x_ant + 0.085, 0.018, 0.008, z_ant),
-        (x_ant + 0.030, 0.022, 0.010, z_ant + 0.028),
-        (x_ant - 0.035, 0.017, 0.007, z_ant + 0.056),
-        (x_ant - 0.075, 0.010, 0.004, z_ant + 0.062),
+        (x_ant + 0.095, 0.015, 0.006, z_ant + 0.004),
+        (x_ant + 0.055, 0.021, 0.009, z_ant + 0.018),
+        (x_ant + 0.015, 0.023, 0.010, z_ant + 0.036),
+        (x_ant - 0.025, 0.019, 0.008, z_ant + 0.054),
+        (x_ant - 0.058, 0.014, 0.005, z_ant + 0.064),
+        (x_ant - 0.082, 0.008, 0.003, z_ant + 0.060),
     ]
     a_rings = []
     for xa, w_b, w_t, z_hi in ant_specs:
+        z_mid = z_ant + 0.45 * (z_hi - z_ant)
+        w_m = 0.55 * w_b + 0.45 * w_t
         a_rings.append([
-            bm_ant.verts.new(Vector((xa, -w_b, z_ant - 0.004))),
-            bm_ant.verts.new(Vector((xa, +w_b, z_ant - 0.004))),
+            bm_ant.verts.new(Vector((xa, -w_b, z_ant))),
+            bm_ant.verts.new(Vector((xa, +w_b, z_ant))),
+            bm_ant.verts.new(Vector((xa, +w_m, z_mid))),
             bm_ant.verts.new(Vector((xa, +w_t, z_hi))),
             bm_ant.verts.new(Vector((xa, -w_t, z_hi))),
+            bm_ant.verts.new(Vector((xa, -w_m, z_mid))),
         ])
     for i_a in range(len(a_rings) - 1):
         r0, r1 = a_rings[i_a], a_rings[i_a + 1]
-        for k in range(4):
-            kn = (k + 1) % 4
+        for k in range(6):
+            kn = (k + 1) % 6
             bm_ant.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
-    bm_ant.faces.new((a_rings[0][0], a_rings[0][3], a_rings[0][2], a_rings[0][1]))
-    bm_ant.faces.new((a_rings[-1][0], a_rings[-1][1], a_rings[-1][2], a_rings[-1][3]))
+    for end_a, rev in ((a_rings[0], True), (a_rings[-1], False)):
+        if rev:
+            bm_ant.faces.new((end_a[0], end_a[5], end_a[2], end_a[1]))
+            bm_ant.faces.new((end_a[5], end_a[4], end_a[3], end_a[2]))
+        else:
+            bm_ant.faces.new((end_a[0], end_a[1], end_a[2], end_a[5]))
+            bm_ant.faces.new((end_a[5], end_a[2], end_a[3], end_a[4]))
+    # Резиновая прокладка-основание антенны (slot 1 = Piano_Black)
+    n_ant_paint = len(bm_ant.faces)
+    add_box(bm_ant, x_ant - 0.085, x_ant + 0.098, -0.025, +0.025, z_ant - 0.005, z_ant + 0.002)
+    bm_ant.faces.ensure_lookup_table()
+    for fi in range(n_ant_paint, len(bm_ant.faces)):
+        bm_ant.faces[fi].material_index = 1
     ant_ob = bmesh_to_object('Roof_Antenna', bm_ant, material=mats['paint'],
                              smooth=True, collection=collection, auto_smooth_deg=55.0,
-                             bevel=0.0020, bevel_segs=2, subsurf=1)
+                             bevel=0.0018, bevel_segs=2, subsurf=1)
+    ant_ob.data.materials.append(mats['piano_black'])
     uv_box(ant_ob, scale=8.0)
     ant_ob.parent = roof_ob
     ant_ob.matrix_parent_inverse = roof_ob.matrix_world.inverted()
     objs.append(ant_ob)
 
-    # 7. Стеклоочистители (Wiper_L, Wiper_R) у нижнего края лобового стекла
-    z_wb = BELT(WINDSHIELD_X_BOT) + 0.016
-    for w_lbl, y_piv, y_tip in (('L', 0.06, 0.62), ('R', -0.46, 0.14)):
+    # 8. Детализированные бескаркасные стеклоочистители (Wiper_L, Wiper_R):
+    #    ось-колпачок на жабо + металлический поводок + адаптер + аэродинамическая щётка + резинка
+    z_wb = BELT(WINDSHIELD_X_BOT) + 0.015
+    for w_lbl, y_piv, y_tip in (('L', 0.06, 0.64), ('R', -0.48, 0.14)):
         bm_wp = bmesh.new()
-        x_piv = WINDSHIELD_X_BOT + 0.035
-        x_tip = WINDSHIELD_X_BOT - 0.012
-        w_pts = []
-        for k in range(6):
-            u_w = k / 5.0
+        x_piv = WINDSHIELD_X_BOT + 0.042
+        x_tip = WINDSHIELD_X_BOT - 0.014
+        # 8a. Круглый защитный колпачок оси поводка на жабо
+        _add_z_cylinder(bm_wp, 0.015, z_wb - 0.012, z_wb + 0.012, seg=14,
+                        center_xy=(x_piv + 0.012, y_piv))
+        # 8b. Металлический поводок от оси до центрального адаптера (u = 0.0 .. 0.48)
+        arm_pts = []
+        for k in range(5):
+            u_w = 0.48 * (k / 4.0)
             yy = y_piv * (1.0 - u_w) + y_tip * u_w
             xx = x_piv * (1.0 - u_w) + x_tip * u_w + 0.016 * (1.0 - (yy / 0.72) ** 2)
-            zz = z_wb + 0.022 * u_w - 0.006 * (yy * yy)
-            w_pts.append(Vector((xx, yy, zz)))
-        w_rings = []
-        for idx_w, p in enumerate(w_pts):
-            t_w = (w_pts[1] - w_pts[0]) if idx_w == 0 else (w_pts[idx_w] - w_pts[idx_w - 1])
-            t_w.normalize()
-            up_w = Vector((0.0, 0.0, 1.0))
-            side_w = t_w.cross(up_w).normalized()
-            hw_w = 0.0075
-            hz_w = 0.0060
-            w_rings.append([
-                bm_wp.verts.new(p - side_w * hw_w - up_w * hz_w),
-                bm_wp.verts.new(p + side_w * hw_w - up_w * hz_w),
-                bm_wp.verts.new(p + side_w * hw_w + up_w * hz_w),
-                bm_wp.verts.new(p - side_w * hw_w + up_w * hz_w),
-            ])
-        for i_w in range(len(w_rings) - 1):
-            r0, r1 = w_rings[i_w], w_rings[i_w + 1]
-            for k in range(4):
-                kn = (k + 1) % 4
-                bm_wp.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
-        bm_wp.faces.new((w_rings[0][0], w_rings[0][3], w_rings[0][2], w_rings[0][1]))
-        bm_wp.faces.new((w_rings[-1][0], w_rings[-1][1], w_rings[-1][2], w_rings[-1][3]))
+            zz = z_wb + 0.022 * u_w - 0.006 * (yy * yy) + 0.006
+            arm_pts.append(Vector((xx, yy, zz)))
+        _sweep_rect_tube(bm_wp, arm_pts, half_y=0.0055, half_n=0.0042)
+        # 8c. Центральный адаптер крепления щётки
+        p_mid = arm_pts[-1]
+        add_box(bm_wp, p_mid.x - 0.012, p_mid.x + 0.012,
+                p_mid.y - 0.026, p_mid.y + 0.026, p_mid.z - 0.006, p_mid.z + 0.009)
+        # 8d. Аэродинамическая бескаркасная щётка-спойлер (вдоль всей рабочей длины u=0.14..1.0)
+        blade_pts = []
+        for k in range(8):
+            u_w = 0.14 + 0.86 * (k / 7.0)
+            yy = y_piv * (1.0 - u_w) + y_tip * u_w
+            xx = x_piv * (1.0 - u_w) + x_tip * u_w + 0.015 * (1.0 - (yy / 0.72) ** 2) - 0.006
+            zz = z_wb + 0.021 * u_w - 0.006 * (yy * yy) + 0.002
+            blade_pts.append(Vector((xx, yy, zz)))
+        _sweep_rect_tube(bm_wp, blade_pts, half_y=0.0075, half_n=0.0045)
+        # 8e. Нижняя резиновая лента щётки (slot 1 = Rubber)
+        n_bef_rub = len(bm_wp.faces)
+        rub_pts = [p - Vector((0.0, 0.0, 0.0055)) for p in blade_pts]
+        _sweep_rect_tube(bm_wp, rub_pts, half_y=0.0030, half_n=0.0030)
+        bm_wp.faces.ensure_lookup_table()
+        for fi in range(n_bef_rub, len(bm_wp.faces)):
+            bm_wp.faces[fi].material_index = 1
         wp_ob = bmesh_to_object(f'Wiper_{w_lbl}', bm_wp, material=mats['piano_black'],
-                                smooth=True, collection=collection, bevel=0.0012, bevel_segs=1)
+                                smooth=True, collection=collection, bevel=0.0010, bevel_segs=1)
+        wp_ob.data.materials.append(mats['rubber'])
         uv_box(wp_ob, scale=10.0)
         wp_ob.parent = body_ob
         wp_ob.matrix_parent_inverse = body_ob.matrix_world.inverted()
@@ -2399,65 +2478,109 @@ def _make_box_object(name, bounds, material, collection, uv_scale=1.5):
 
 
 def _build_steering_wheel(mats, collection):
-    """Замкнутый манифолд-руль с origin в центре обода и наклоном к водителю."""
+    """Скульптурный 3-спицевый руль Volvo S90: круглый тороидальный обод (36×12) с приливами
+    «10 и 2 часа», округлая подушка безопасности с Iron Mark, блоки кнопок мультируля и хром."""
     bm = bmesh.new()
-    r_out, r_in, dt, seg = 0.185, 0.155, 0.024, 32
-    # Обод строится в плоскости YZ (ось вращения — локальная X, наклон в сторону водителя)
-    rings = []
-    for xx in (-dt / 2.0, dt / 2.0):
-        rout = []
-        rin = []
-        for i in range(seg):
-            a = 2.0 * math.pi * i / seg
-            cy, cz = math.cos(a), math.sin(a)
-            rout.append(bm.verts.new(Vector((xx, r_out * cy, r_out * cz))))
-            rin.append(bm.verts.new(Vector((xx, r_in * cy, r_in * cz))))
-        rings.append((rout, rin))
+    r_maj = 0.172
+    r_min = 0.0175
+    n_maj, n_min = 36, 12
 
-    rout0, rin0 = rings[0]
-    rout1, rin1 = rings[1]
-    for k in range(seg):
-        kn = (k + 1) % seg
-        # Задняя и передняя плоские грани обода
-        bm.faces.new((rout0[k], rin0[k], rin0[kn], rout0[kn]))
-        bm.faces.new((rout1[k], rout1[kn], rin1[kn], rin1[k]))
-        # Внешняя и внутренняя цилиндрические стенки обода
-        bm.faces.new((rout0[k], rout0[kn], rout1[kn], rout1[k]))
-        bm.faces.new((rin0[k], rin1[k], rin1[kn], rin0[kn]))
+    # 1. Круглый тороидальный кожаный обод в плоскости YZ (slot 0 = Leather)
+    torus_rings = []
+    for i in range(n_maj):
+        a = 2.0 * math.pi * i / n_maj
+        ca, sa = math.cos(a), math.sin(a)
+        # Эргономичные утолщения-приливы на «10 и 2 часа» (a ≈ 35° и 145°)
+        grip = 1.0 + 0.14 * (
+            math.exp(-((a - math.radians(35.0)) / 0.25) ** 2)
+            + math.exp(-((a - math.radians(145.0)) / 0.25) ** 2)
+        )
+        rr = r_min * grip
+        ring = []
+        for j in range(n_min):
+            b = 2.0 * math.pi * j / n_min
+            cb, sb = math.cos(b), math.sin(b)
+            rad = r_maj + rr * cb
+            xx = rr * sb
+            ring.append(bm.verts.new(Vector((xx, rad * ca, rad * sa))))
+        torus_rings.append(ring)
+    for i in range(n_maj):
+        inext = (i + 1) % n_maj
+        r0, r1 = torus_rings[i], torus_rings[inext]
+        for j in range(n_min):
+            jnext = (j + 1) % n_min
+            bm.faces.new((r0[j], r0[jnext], r1[jnext], r1[j]))
 
-    # Центральная ступица (замкнутый блок) и 3 замкнутые спицы (без касания вершин обода)
-    add_box(bm, -0.028, 0.028, -0.050, 0.050, -0.050, 0.050)
-    add_box(bm, -0.010, 0.010, 0.054, r_in - 0.004, -0.014, 0.014)    # левая спица
-    add_box(bm, -0.010, 0.010, -(r_in - 0.004), -0.054, -0.014, 0.014)  # правая спица
-    add_box(bm, -0.010, 0.010, -0.016, 0.016, -(r_in - 0.004), -0.054)  # нижняя спица
+    # 2. Скульптурная кругло-трапециевидная центральная подушка безопасности (slot 0 = Leather)
+    _add_x_cylinder(bm, 0.056, -0.032, +0.024, seg=24, center_yz=(0.0, 0.0))
+    add_box(bm, -0.024, +0.018, -0.044, +0.044, -0.064, -0.036)
 
-    sw = bmesh_to_object('SteeringWheel', bm, material=mats['carbon'],
-                         smooth=True, collection=collection)
+    # 3. Три профилированные спицы (левая, правая, сдвоенная нижняя) + блоки кнопок (slot 1)
+    n_pb0 = len(bm.faces)
+    # Левая и правая спицы с глянцевыми пультами кнопок мультируля (Piano_Black)
+    for sy_s in (-1.0, +1.0):
+        ya, yb = sorted((sy_s * 0.058, sy_s * (r_maj - r_min - 0.002)))
+        add_box(bm, -0.014, +0.014, ya, yb, -0.019, +0.019)
+        # Выступающий блок глянцевых кнопок мультируля со стороны водителя (-X)
+        yc0, yc1 = sorted((sy_s * 0.070, sy_s * 0.125))
+        add_box(bm, -0.021, -0.015, yc0, yc1, -0.016, +0.016)
+    # Нижняя сдвоенная спица (две боковые ветви + нижняя перемычка)
+    add_box(bm, -0.012, +0.012, -0.034, -0.014, -(r_maj - r_min - 0.002), -0.066)
+    add_box(bm, -0.012, +0.012, +0.014, +0.034, -(r_maj - r_min - 0.002), -0.066)
+    n_pb1 = len(bm.faces)
+
+    # 4. Хромированные акценты Volvo: кольцо эмблемы Iron Mark, диагональ и декор нижней спицы
+    _add_x_cylinder(bm, 0.020, -0.036, -0.033, seg=20, center_yz=(0.0, 0.0))
+    add_box(bm, -0.037, -0.0335, -0.036, +0.036, -0.004, +0.004)
+    # Хромированная окантовка нижней спицы и кнопок
+    add_box(bm, -0.016, -0.0125, -0.036, +0.036, -(r_maj - r_min + 0.004), -(r_maj - r_min - 0.014))
+    for sy_s in (-1.0, +1.0):
+        yc0, yc1 = sorted((sy_s * 0.072, sy_s * 0.122))
+        add_box(bm, -0.0225, -0.0212, yc0, yc1, -0.018, -0.015)
+
+    bm.faces.ensure_lookup_table()
+    for fi in range(n_pb0, n_pb1):
+        bm.faces[fi].material_index = 1
+    for fi in range(n_pb1, len(bm.faces)):
+        bm.faces[fi].material_index = 2
+
+    sw = bmesh_to_object('SteeringWheel', bm, material=mats['leather'],
+                         smooth=True, collection=collection, auto_smooth_deg=55.0)
+    sw.data.materials.append(mats['piano_black'])
+    sw.data.materials.append(mats['chrome'])
     uv_box(sw, scale=4.0)
     # Левый руль (+Y), слегка наклонён к водителю (-Y поворот на 20° вокруг Y)
-    sw.location = Vector((0.54, 0.36, 0.87))
+    sw.location = Vector((0.52, 0.36, 0.875))
     sw.rotation_euler = (0.0, math.radians(-20.0), 0.0)
     return sw
 
 
 def build_interior(mats, collection, door_objs=None):
     objs = []
-    # Премиальный салон Volvo S90: скульптурные кресла с боковой поддержкой, анатомическим
-    # наклоном спинок, подголовниками на хромированных стойках и консолью с селектором АКПП!
+    # Премиальный скандинавский салон Volvo S90 Inscription:
+    # * анатомические многосекционные кресла с удлинителем подушки, сужающимися спинками
+    #   и стройными подголовниками Volvo на хромированных стойках;
+    # * двухъярусная торпеда со шпоном Linear Walnut, цифровой приборкой 12.3",
+    #   вертикальным OLED-планшетом Sensus 9", физическими кнопками и 4 дефлекторами;
+    # * центральная консоль с хрустальным селектором Orrefors, Start/Stop, подстаканниками;
+    # * педали с алюминиевыми накладками, рулевая колонка, потолочный плафон, козырьки,
+    #   безрамочное зеркало и многослойные дверные карты со шпоном и динамиками B&W!
     bm = bmesh.new()
+    bm_bol = bmesh.new()
+    bm_chr = bmesh.new()
     gap = 0.004
 
-    def _add_slanted_block(x_bot0, x_bot1, x_top0, x_top1, y0, y1, z0, z1):
-        """Добавляет наклонный замкнутый блок (анатомическая спинка/подголовник кресла)."""
+    def _add_tapered_block(target_bm, x_b0, x_b1, x_t0, x_t1, yb0, yb1, yt0, yt1, z0, z1):
+        """Наклонный сужающийся замкнутый блок (анатомическая спинка/подголовник Volvo)."""
         v = [
-            bm.verts.new(Vector((x_bot0, y0, z0))),
-            bm.verts.new(Vector((x_bot1, y0, z0))),
-            bm.verts.new(Vector((x_bot1, y1, z0))),
-            bm.verts.new(Vector((x_bot0, y1, z0))),
-            bm.verts.new(Vector((x_top0, y0, z1))),
-            bm.verts.new(Vector((x_top1, y0, z1))),
-            bm.verts.new(Vector((x_top1, y1, z1))),
-            bm.verts.new(Vector((x_top0, y1, z1))),
+            target_bm.verts.new(Vector((x_b0, yb0, z0))),
+            target_bm.verts.new(Vector((x_b1, yb0, z0))),
+            target_bm.verts.new(Vector((x_b1, yb1, z0))),
+            target_bm.verts.new(Vector((x_b0, yb1, z0))),
+            target_bm.verts.new(Vector((x_t0, yt0, z1))),
+            target_bm.verts.new(Vector((x_t1, yt0, z1))),
+            target_bm.verts.new(Vector((x_t1, yt1, z1))),
+            target_bm.verts.new(Vector((x_t0, yt1, z1))),
         ]
         for f in (
             (v[0], v[3], v[2], v[1]),
@@ -2467,93 +2590,298 @@ def build_interior(mats, collection, door_objs=None):
             (v[0], v[4], v[7], v[3]),
             (v[1], v[2], v[6], v[5]),
         ):
-            bm.faces.new(f)
+            target_bm.faces.new(f)
 
-    # Передние скульптурные кресла (водитель + пассажир) с боковой поддержкой и подголовниками
-    bm_chr = bmesh.new()
+    # 1. Передние анатомические кресла Volvo (водитель + пассажир)
     for side in (-1.0, 1.0):
         yc = side * 0.37
-        # Центральная подушка + мягкие боковые валики поддержки бёдер
-        add_box(bm, -0.06, 0.43, yc - 0.16, yc + 0.16, 0.36, 0.49)
-        add_box(bm, -0.05, 0.43, yc - 0.22, yc - 0.16 - gap, 0.37, 0.515)
-        add_box(bm, -0.05, 0.43, yc + 0.16 + gap, yc + 0.22, 0.37, 0.515)
-        # Анатомическая наклонная спинка (наклон назад ~15°) + интегрированные валики
-        _add_slanted_block(-0.14, -0.04, -0.27, -0.17, yc - 0.155, yc + 0.155, 0.48, 0.98)
-        _add_slanted_block(-0.11, -0.02, -0.24, -0.15, yc - 0.215, yc - 0.155 - gap, 0.50, 0.89)
-        _add_slanted_block(-0.11, -0.02, -0.24, -0.15, yc + 0.155 + gap, yc + 0.215, 0.50, 0.89)
-        # Хромированные стойки подголовника (в Cabin_Chrome, чтобы не мешать bevel кресел)
-        for dy_p in (-0.050, +0.050):
-            _add_z_cylinder(bm_chr, 0.006, 0.975, 1.045, seg=10, center_xy=(-0.22, yc + dy_p))
-        # Фирменный стройный округлый подголовник Volvo (слегка наклонён вперёд)
-        _add_slanted_block(-0.26, -0.17, -0.24, -0.155, yc - 0.085, yc + 0.085, 1.042, 1.185)
+        # Контурная центральная подушка (лёгкий наклон к спинке) + передний валик под колени
+        _add_tapered_block(bm_bol, -0.05, 0.33, -0.05, 0.33,
+                           yc - 0.155, yc + 0.155, yc - 0.155, yc + 0.155, 0.365, 0.485)
+        add_box(bm_bol, 0.335, 0.455, yc - 0.155, yc + 0.155, 0.375, 0.495)
+        # Обхватывающие боковые валики подушки (основная кожа Cabin)
+        add_box(bm, -0.04, 0.44, yc - 0.232, yc - 0.160, 0.365, 0.525)
+        add_box(bm, -0.04, 0.44, yc + 0.160, yc + 0.232, 0.365, 0.525)
+        # 2-секционная анатомическая спинка: поясничная часть + сужающаяся плечевая часть
+        _add_tapered_block(bm_bol, -0.145, -0.045, -0.215, -0.115,
+                           yc - 0.155, yc + 0.155, yc - 0.150, yc + 0.150, 0.48, 0.75)
+        _add_tapered_block(bm_bol, -0.218, -0.118, -0.275, -0.180,
+                           yc - 0.150, yc + 0.150, yc - 0.125, yc + 0.125, 0.754, 0.985)
+        # Плавные сужающиеся кверху боковые валики спинки (обнимают торс, не торчат «рогами»)
+        _add_tapered_block(bm, -0.125, -0.025, -0.245, -0.155,
+                           yc - 0.228, yc - 0.158, yc - 0.185, yc - 0.130, 0.49, 0.90)
+        _add_tapered_block(bm, -0.125, -0.025, -0.245, -0.155,
+                           yc + 0.158, yc + 0.228, yc + 0.130, yc + 0.185, 0.49, 0.90)
+        # Хромированные направляющие подголовника с втулками
+        for dy_p in (-0.044, +0.044):
+            _add_z_cylinder(bm_chr, 0.0055, 0.980, 1.046, seg=10, center_xy=(-0.228, yc + dy_p))
+            _add_z_cylinder(bm_chr, 0.011, 0.982, 0.996, seg=12, center_xy=(-0.228, yc + dy_p))
+        # Фирменный тонкий трапециевидный подголовник Volvo (сужается кверху, наклонён вперёд)
+        _add_tapered_block(bm, -0.265, -0.185, -0.242, -0.172,
+                           yc - 0.088, yc + 0.088, yc - 0.068, yc + 0.068, 1.042, 1.185)
 
-    # Задний диван с 3 профилированными местами, подлокотником и 3 подголовниками
-    add_box(bm, -0.78, -0.34, -0.56, 0.56, 0.36, 0.50)
-    _add_slanted_block(-0.88, -0.78 - gap, -0.96, -0.86, -0.56, 0.56, 0.46, 0.95)
+    # 2. Задний диван (3 профилированных места + центральный откидной подлокотник + 3 подголовника)
+    for y_rs in (-0.37, +0.37):
+        add_box(bm_bol, -0.78, -0.34, y_rs - 0.18, y_rs + 0.18, 0.365, 0.505)
+        _add_tapered_block(bm_bol, -0.88, -0.78 - gap, -0.96, -0.86,
+                           y_rs - 0.18, y_rs + 0.18, y_rs - 0.16, y_rs + 0.16, 0.46, 0.95)
+    # Центральная секция заднего дивана + очерченный откидной подлокотник
+    add_box(bm, -0.78, -0.36, -0.185, +0.185, 0.365, 0.498)
+    _add_tapered_block(bm, -0.88, -0.78 - gap, -0.96, -0.86,
+                       -0.185, +0.185, -0.17, +0.17, 0.46, 0.94)
     for y_hr in (-0.36, 0.0, +0.36):
-        hw_hr = 0.085 if abs(y_hr) > 0.1 else 0.095
-        z_hr_top = 1.12 if abs(y_hr) > 0.1 else 1.08
-        _add_slanted_block(-0.95, -0.86, -0.93, -0.84, y_hr - hw_hr, y_hr + hw_hr, 0.96, z_hr_top)
+        hw_b = 0.082 if abs(y_hr) > 0.1 else 0.090
+        hw_t = 0.064 if abs(y_hr) > 0.1 else 0.072
+        z_hr_top = 1.115 if abs(y_hr) > 0.1 else 1.075
+        _add_tapered_block(bm, -0.95, -0.865, -0.928, -0.850,
+                           y_hr - hw_b, y_hr + hw_b, y_hr - hw_t, y_hr + hw_t, 0.955, z_hr_top)
 
     # Задняя полка под покатым задним стеклом (не выступает в нишу багажника TRUNK_X_FRONT)
-    add_box(bm, TRUNK_X_FRONT + 0.04, -0.96, -0.56, 0.56, 0.96, 1.00)
+    add_box(bm, TRUNK_X_FRONT + 0.04, -0.96, -0.56, 0.56, 0.955, 1.00)
 
-    # Центральный тоннель + мягкий подлокотник + селектор АКПП + хромированный обод консоли
-    add_box(bm, -0.82, 0.78, -0.115, 0.115, CABIN_FLOOR_Z + 0.028, 0.57)
-    add_box(bm, -0.22, 0.16, -0.105, 0.105, 0.574, 0.655)  # центральный подлокотник
-    _add_z_cylinder(bm_chr, 0.018, 0.574, 0.665, seg=14, center_xy=(0.36, 0.0))  # селектор АКПП
-    add_box(bm_chr, 0.22, 0.54, -0.095, -0.085, 0.572, 0.584)
-    add_box(bm_chr, 0.22, 0.54, +0.085, +0.095, 0.572, 0.584)
+    # Центральный тоннель + мягкий подлокотник с раздельной крышкой
+    add_box(bm, -0.82, 0.78, -0.125, 0.125, CABIN_FLOOR_Z + 0.028, 0.565)
+    add_box(bm, -0.24, 0.14, -0.112, 0.112, 0.568, 0.652)
 
-    # Мягкая кожаная геометрия кресел (крупная 3-сегментная фаска 30 мм -> плюшевые округлые формы!)
     cabin = bmesh_to_object('Cabin', bm, material=mats['leather'],
                             smooth=True, collection=collection, auto_smooth_deg=65.0,
-                            bevel=0.030, bevel_segs=3)
+                            bevel=0.026, bevel_segs=3)
     uv_box(cabin, scale=1.5)
     objs.append(cabin)
 
+    cabin_bol = bmesh_to_object('Cabin_Seats_Insert', bm_bol, material=mats['leather_light'],
+                                smooth=True, collection=collection, auto_smooth_deg=65.0,
+                                bevel=0.026, bevel_segs=3)
+    uv_box(cabin_bol, scale=1.6)
+    objs.append(cabin_bol)
+
     cabin_chr = bmesh_to_object('Cabin_Chrome', bm_chr, material=mats['chrome'],
-                                smooth=True, collection=collection, bevel=0.002, bevel_segs=1)
+                                smooth=True, collection=collection, bevel=0.0015, bevel_segs=1)
     uv_box(cabin_chr, scale=8.0)
     objs.append(cabin_chr)
 
-    # Панель приборов (передняя часть салона +X у моторного щита, с мягким козырьком приборки)
+    # 3. Центральная консоль (шпон Linear Walnut + подстаканники + Orrefors + Start/Stop)
+    bm_cc = bmesh.new()
+    # Наклонная верхняя декоративная площадка из шпона (slot 0 = Wood)
+    add_box(bm_cc, 0.15, 0.60, -0.108, +0.108, 0.566, 0.580)
+    # 2 утопленных колодца подстаканников справа от селектора (slot 1 = Piano_Black)
+    f_cc_pb0 = len(bm_cc.faces)
+    _add_z_cylinder(bm_cc, 0.034, 0.576, 0.583, seg=20, center_xy=(0.24, -0.044))
+    _add_z_cylinder(bm_cc, 0.034, 0.576, 0.583, seg=20, center_xy=(0.33, -0.044))
+    # Основание селектора АКПП и кнопка электроручника
+    add_box(bm_cc, 0.36, 0.52, -0.015, +0.085, 0.580, 0.588)
+    add_box(bm_cc, 0.18, 0.24, +0.025, +0.075, 0.580, 0.592)
+    f_cc_pb1 = len(bm_cc.faces)
+    # Хром-периметр консоли, селектор, Start/Stop и Drive Mode (slot 2 = Chrome)
+    add_box(bm_cc, 0.148, 0.602, -0.114, -0.105, 0.568, 0.584)
+    add_box(bm_cc, 0.148, 0.602, +0.105, +0.114, 0.568, 0.584)
+    # Селектор АКПП: хромированный шток + гранёная рукоятка
+    _add_z_cylinder(bm_cc, 0.010, 0.586, 0.652, seg=14, center_xy=(0.44, +0.035))
+    add_box(bm_cc, 0.422, 0.464, +0.012, +0.058, 0.650, 0.692)
+    # Фирменный поворотный выключатель Engine Start/Stop (ромб-цилиндр)
+    _add_z_cylinder(bm_cc, 0.015, 0.582, 0.606, seg=8, center_xy=(0.31, +0.048))
+    # Металлический цилиндр-роллер Drive Mode
+    _add_y_cylinder(bm_cc, 0.010, +0.035, +0.062, seg=14, center_xz=(0.26, 0.590))
+    bm_cc.faces.ensure_lookup_table()
+    for fi in range(f_cc_pb0, f_cc_pb1):
+        bm_cc.faces[fi].material_index = 1
+    for fi in range(f_cc_pb1, len(bm_cc.faces)):
+        bm_cc.faces[fi].material_index = 2
+    cc_ob = bmesh_to_object('Center_Console', bm_cc, material=mats['wood'],
+                            smooth=True, collection=collection, bevel=0.0020, bevel_segs=1)
+    cc_ob.data.materials.append(mats['piano_black'])
+    cc_ob.data.materials.append(mats['chrome'])
+    uv_box(cc_ob, scale=3.0)
+    objs.append(cc_ob)
+
+    # 4. Двухъярусная скульптурная панель приборов (Dashboard)
     bm_dash = bmesh.new()
-    add_box(bm_dash, 0.62, 0.85, -0.74, 0.74, 0.56, 0.93)
-    add_box(bm_dash, 0.60, 0.80, +0.16, +0.56, 0.934, 0.985)  # козырёк приборной панели
+    # Основная нижняя база торпеды
+    add_box(bm_dash, 0.64, 0.86, -0.73, +0.73, 0.56, 0.87)
+    # Верхний кожаный козырёк-навес (чуть выдвинут в салон, создаёт глубокую тень над декором)
+    add_box(bm_dash, 0.60, 0.85, -0.73, +0.73, 0.872, 0.940)
+    # Скульптурный купол-козырёк над цифровой приборкой водителя (+Y)
+    _add_tapered_block(bm_dash, 0.56, 0.82, 0.59, 0.82,
+                       +0.15, +0.58, +0.19, +0.54, 0.935, 1.005)
+    # Выступающая крышка перчаточного ящика (бардачка) со стороны пассажира (-Y)
+    add_box(bm_dash, 0.615, 0.642, -0.68, -0.18, 0.59, 0.745)
     dash = bmesh_to_object('Dashboard', bm_dash, material=mats['leather'],
                            smooth=True, collection=collection, auto_smooth_deg=65.0,
-                           bevel=0.022, bevel_segs=3)
+                           bevel=0.018, bevel_segs=3)
     uv_box(dash, scale=1.5)
     objs.append(dash)
 
-    # Центральный вертикальный планшет Volvo Sensus + боковые вертикальные дефлекторы
+    # 4b. Декоративная вставка из шпона Linear Walnut + хромированный кант + ручка бардачка
+    bm_dt = bmesh.new()
+    # Широкая планка шпона со стороны пассажира и водителя (slot 0 = Wood)
+    add_box(bm_dt, 0.612, 0.645, -0.66, -0.175, 0.765, 0.855)
+    add_box(bm_dt, 0.612, 0.645, +0.58, +0.69, 0.765, 0.855)
+    n_dt_w = len(bm_dt.faces)
+    # Тонкий хромированный молдинг под шпоном + хромированная ручка бардачка (slot 1 = Chrome)
+    add_box(bm_dt, 0.606, 0.640, -0.66, -0.175, 0.752, 0.762)
+    add_box(bm_dt, 0.606, 0.640, +0.58, +0.69, 0.752, 0.762)
+    add_box(bm_dt, 0.604, 0.620, -0.32, -0.22, 0.715, 0.732)
+    bm_dt.faces.ensure_lookup_table()
+    for fi in range(n_dt_w, len(bm_dt.faces)):
+        bm_dt.faces[fi].material_index = 1
+    dt_ob = bmesh_to_object('Dash_Trim', bm_dt, material=mats['wood'],
+                            smooth=True, collection=collection, bevel=0.0025, bevel_segs=2)
+    dt_ob.data.materials.append(mats['chrome'])
+    uv_box(dt_ob, scale=3.0)
+    objs.append(dt_ob)
+
+    # 4c. Цифровая приборная панель 12.3" (Instrument_Cluster) на лицевой грани торпеды за рулём
+    bm_ic = bmesh.new()
+    # Чёрная глянцевая рамка-ниша приборки (slot 0 = Piano_Black)
+    add_box(bm_ic, 0.594, 0.635, +0.195, +0.535, 0.808, 0.942)
+    n_ic_ui0 = len(bm_ic.faces)
+    # OLED-дисплей приборной панели (slot 1 = Screen_Sensus_UI)
+    add_box(bm_ic, 0.588, 0.593, +0.208, +0.522, 0.820, 0.930)
+    n_ic_ui1 = len(bm_ic.faces)
+    # Два тонких хромированных кольца виртуальных шкал спидометра и тахометра (slot 2 = Chrome)
+    for y_dial in (+0.275, +0.455):
+        _add_x_cylinder(bm_ic, 0.042, 0.583, 0.5875, seg=24, center_yz=(y_dial, 0.875))
+    bm_ic.faces.ensure_lookup_table()
+    for fi in range(n_ic_ui0, n_ic_ui1):
+        bm_ic.faces[fi].material_index = 1
+    for fi in range(n_ic_ui1, len(bm_ic.faces)):
+        bm_ic.faces[fi].material_index = 2
+    ic_ob = bmesh_to_object('Instrument_Cluster', bm_ic, material=mats['piano_black'],
+                            smooth=True, collection=collection, bevel=0.002, bevel_segs=1)
+    ic_ob.data.materials.append(mats['screen_ui'])
+    ic_ob.data.materials.append(mats['chrome'])
+    uv_box(ic_ob, scale=3.0)
+    objs.append(ic_ob)
+
+    # 4d. Центральный вертикальный планшет Volvo Sensus 9" + панель кнопок и крутилка громкости
     bm_sc = bmesh.new()
-    # Глянцевая рамка и вертикальные дефлекторы по бокам экрана (slot 0 = Piano_Black)
-    add_box(bm_sc, 0.592, 0.620, -0.105, +0.105, 0.695, 0.915)
-    add_box(bm_sc, 0.596, 0.622, -0.155, -0.112, 0.710, 0.900)
-    add_box(bm_sc, 0.596, 0.622, +0.112, +0.155, 0.710, 0.900)
-    # Светящийся экран дисплея со стороны салона (-X, slot 1 = White/Sensus)
-    n_sc_w = len(bm_sc.faces)
-    add_box(bm_sc, 0.586, 0.591, -0.092, +0.092, 0.708, 0.902)
+    # Глянцевый корпус экрана + нижняя полоса физических кнопок (slot 0 = Piano_Black)
+    add_box(bm_sc, 0.592, 0.638, -0.105, +0.105, 0.670, 0.918)
+    # 6 физических клавиш под экраном
+    for kb_y in (-0.082, -0.056, -0.032, +0.032, +0.056, +0.082):
+        add_box(bm_sc, 0.583, 0.592, kb_y - 0.009, kb_y + 0.009, 0.678, 0.692)
+    n_sc_ui0 = len(bm_sc.faces)
+    # Подсвеченный OLED-дисплей Sensus (slot 1 = Screen_Sensus_UI)
+    add_box(bm_sc, 0.586, 0.591, -0.092, +0.092, 0.708, 0.904)
+    n_sc_ui1 = len(bm_sc.faces)
+    # Хромированный кант экрана + центральная крутилка громкости + кнопка Home (slot 2 = Chrome)
+    add_box(bm_sc, 0.587, 0.594, -0.108, +0.108, 0.916, 0.922)
+    add_box(bm_sc, 0.587, 0.594, -0.108, +0.108, 0.665, 0.671)
+    _add_x_cylinder(bm_sc, 0.013, 0.574, 0.591, seg=18, center_yz=(0.0, 0.685))
+    add_box(bm_sc, 0.584, 0.590, -0.022, +0.022, 0.698, 0.704)
     bm_sc.faces.ensure_lookup_table()
-    for fi in range(n_sc_w, len(bm_sc.faces)):
+    for fi in range(n_sc_ui0, n_sc_ui1):
         bm_sc.faces[fi].material_index = 1
+    for fi in range(n_sc_ui1, len(bm_sc.faces)):
+        bm_sc.faces[fi].material_index = 2
     screen = bmesh_to_object('Screen', bm_sc, material=mats['piano_black'],
-                             smooth=True, collection=collection, bevel=0.003, bevel_segs=1)
-    screen.data.materials.append(mats['white'])
+                             smooth=True, collection=collection, bevel=0.0025, bevel_segs=1)
+    screen.data.materials.append(mats['screen_ui'])
+    screen.data.materials.append(mats['chrome'])
     uv_box(screen, scale=2.0)
     objs.append(screen)
 
-    # Салонное зеркало заднего вида СТРОГО ВНУТРИ салона под верхней кромкой лобового стекла
-    # (при x=0.25..0.31 стекло идёт на z=1.35..1.38 -> зеркало на z=1.24..1.33 не пробивает стекло!)
+    # 4e. 4 фирменных вертикальных дефлектора обдува Volvo (2 у Sensus + 2 по краям торпеды)
+    bm_av = bmesh.new()
+    chr_av_ranges = []
+    for y_v, z0_v, z1_v in ((-0.136, 0.700, 0.908), (+0.136, 0.700, 0.908),
+                            (-0.695, 0.755, 0.875), (+0.695, 0.755, 0.875)):
+        # Корпус-рамка дефлектора (slot 0 = Piano_Black)
+        add_box(bm_av, 0.596, 0.638, y_v - 0.024, y_v + 0.024, z0_v, z1_v)
+        # 5 горизонтальных рельефных жалюзи внутри дефлектора
+        for k_l in range(5):
+            zl = z0_v + 0.016 + (z1_v - z0_v - 0.032) * (k_l / 4.0)
+            add_box(bm_av, 0.588, 0.596, y_v - 0.019, y_v + 0.019, zl - 0.0025, zl + 0.0025)
+        # Фирменный вертикальный хромированный ползунок Volvo по центру (slot 1 = Chrome)
+        fa_c = len(bm_av.faces)
+        add_box(bm_av, 0.582, 0.592, y_v - 0.0045, y_v + 0.0045, z0_v + 0.012, z1_v - 0.012)
+        add_box(bm_av, 0.578, 0.586, y_v - 0.0075, y_v + 0.0075,
+                0.5 * (z0_v + z1_v) - 0.012, 0.5 * (z0_v + z1_v) + 0.012)
+        chr_av_ranges.append((fa_c, len(bm_av.faces)))
+    bm_av.faces.ensure_lookup_table()
+    for fa, fb in chr_av_ranges:
+        for fi in range(fa, fb):
+            bm_av.faces[fi].material_index = 1
+    av_ob = bmesh_to_object('Air_Vents', bm_av, material=mats['piano_black'],
+                            smooth=True, collection=collection, bevel=0.0012, bevel_segs=1)
+    av_ob.data.materials.append(mats['chrome'])
+    uv_box(av_ob, scale=6.0)
+    objs.append(av_ob)
+
+    # 5. Рулевая колонка + подрулевые переключатели (не вращаются вместе с рулём!)
+    bm_scol = bmesh.new()
+    _add_x_cylinder(bm_scol, 0.044, 0.545, 0.650, seg=18, center_yz=(0.36, 0.875))
+    # Левый рычаг поворотников и правый рычаг стеклоочистителей
+    _add_y_cylinder(bm_scol, 0.007, 0.405, 0.515, seg=12, center_xz=(0.575, 0.890))
+    _add_y_cylinder(bm_scol, 0.007, 0.205, 0.315, seg=12, center_xz=(0.575, 0.890))
+    scol_ob = bmesh_to_object('Steering_Column', bm_scol, material=mats['piano_black'],
+                              smooth=True, collection=collection, bevel=0.002, bevel_segs=1)
+    uv_box(scol_ob, scale=6.0)
+    objs.append(scol_ob)
+
+    # 6. Педальный узел водителя (алюминиевая площадка отдыха + тормоз + напольный газ)
+    bm_ped = bmesh.new()
+    # Площадка отдыха левой ноги + педаль тормоза + педаль газа (slot 0 = Alloy)
+    _add_tapered_block(bm_ped, 0.67, 0.69, 0.74, 0.76, +0.52, +0.60, +0.52, +0.60, 0.34, 0.50)
+    _add_tapered_block(bm_ped, 0.65, 0.67, 0.69, 0.71, +0.34, +0.44, +0.34, +0.44, 0.38, 0.45)
+    _add_tapered_block(bm_ped, 0.68, 0.70, 0.74, 0.76, +0.22, +0.28, +0.22, +0.28, 0.33, 0.48)
+    n_ped_al = len(bm_ped.faces)
+    # Противоскользящие резиновые накладки и металлические рычаги педалей (slot 1 = Rubber)
+    add_box(bm_ped, 0.67, 0.74, +0.38, +0.40, 0.44, 0.56)
+    for zp in (0.37, 0.41, 0.45):
+        add_box(bm_ped, 0.665, 0.715, +0.53, +0.59, zp, zp + 0.012)
+    bm_ped.faces.ensure_lookup_table()
+    for fi in range(n_ped_al, len(bm_ped.faces)):
+        bm_ped.faces[fi].material_index = 1
+    ped_ob = bmesh_to_object('Pedals', bm_ped, material=mats['alloy'],
+                             smooth=True, collection=collection, bevel=0.002, bevel_segs=1)
+    ped_ob.data.materials.append(mats['rubber'])
+    uv_box(ped_ob, scale=8.0)
+    objs.append(ped_ob)
+
+    # 7. Безрамочное салонное зеркало заднего вида (строго внутри салона под лобовым стеклом!)
     bm_rvm = bmesh.new()
-    add_box(bm_rvm, 0.240, 0.272, -0.095, 0.095, 1.245, 1.298)
-    add_box(bm_rvm, 0.274, 0.304, -0.012, 0.012, 1.288, 1.334)
+    # Тонкий корпус + кронштейн + датчик дождя у верхней кромки стекла (slot 0 = Piano_Black)
+    add_box(bm_rvm, 0.244, 0.268, -0.098, +0.098, 1.248, 1.298)
+    _add_z_cylinder(bm_rvm, 0.007, 1.296, 1.334, seg=12, center_xy=(0.278, 0.0))
+    add_box(bm_rvm, 0.258, 0.304, -0.028, +0.028, 1.320, 1.342)
+    n_rvm_pb = len(bm_rvm.faces)
+    # Зеркальное полотно со стороны водителя (-X, slot 1 = Chrome)
+    add_box(bm_rvm, 0.240, 0.243, -0.094, +0.094, 1.251, 1.295)
+    bm_rvm.faces.ensure_lookup_table()
+    for fi in range(n_rvm_pb, len(bm_rvm.faces)):
+        bm_rvm.faces[fi].material_index = 1
     rvm = bmesh_to_object('Rearview_Mirror', bm_rvm, material=mats['piano_black'],
-                          smooth=True, collection=collection, bevel=0.003, bevel_segs=2)
+                          smooth=True, collection=collection, bevel=0.0025, bevel_segs=2)
+    rvm.data.materials.append(mats['chrome'])
     uv_box(rvm, scale=6.0)
     objs.append(rvm)
+
+    # 8. Потолочная консоль (плафон освещения + 2 солнцезащитных козырька)
+    bm_rf_in = bmesh.new()
+    z_rf_in = ZR(0.0) - 0.068
+    # Два солнцезащитных козырька (slot 0 = Headliner)
+    for sy_v in (-1.0, +1.0):
+        ya_v, yb_v = sorted((sy_v * 0.14, sy_v * 0.48))
+        add_box(bm_rf_in, 0.12, 0.27, ya_v, yb_v, z_rf_in - 0.018, z_rf_in)
+    # Центральный потолочный плафон и корпус кнопок SOS (slot 1 = Piano_Black)
+    n_rf_pb0 = len(bm_rf_in.faces)
+    add_box(bm_rf_in, 0.06, 0.22, -0.095, +0.095, z_rf_in - 0.022, z_rf_in)
+    n_rf_pb1 = len(bm_rf_in.faces)
+    # Два рассеивателя плафона освещения салона (slot 2 = White)
+    for sy_l in (-0.042, +0.042):
+        add_box(bm_rf_in, 0.09, 0.17, sy_l - 0.026, sy_l + 0.026, z_rf_in - 0.026, z_rf_in - 0.022)
+    bm_rf_in.faces.ensure_lookup_table()
+    for fi in range(n_rf_pb0, n_rf_pb1):
+        bm_rf_in.faces[fi].material_index = 1
+    for fi in range(n_rf_pb1, len(bm_rf_in.faces)):
+        bm_rf_in.faces[fi].material_index = 2
+    rf_in_ob = bmesh_to_object('Interior_Roof_Details', bm_rf_in, material=mats['headliner'],
+                               smooth=True, collection=collection, bevel=0.003, bevel_segs=2)
+    rf_in_ob.data.materials.append(mats['piano_black'])
+    rf_in_ob.data.materials.append(mats['white'])
+    uv_box(rf_in_ob, scale=3.0)
+    objs.append(rf_in_ob)
 
     # Руль с собственным центром вращения
     sw = _build_steering_wheel(mats, collection)
@@ -2577,7 +2905,7 @@ def build_interior(mats, collection, door_objs=None):
     )
     objs.append(headliner)
 
-    # Внутренние дверные карты (кожа + подлокотник + хром-ручка) строго внутри дверных ниш!
+    # 9. Многослойные внутренние дверные карты (кожа + шпон Linear Walnut + кнопки + хром-ручка)
     door_map = {ob.name: ob for ob in (door_objs or [])}
     for d_name, _hx, side, d_len, _deg in DOORS_SPEC:
         parent_door = door_map.get(d_name)
@@ -2589,28 +2917,43 @@ def build_interior(mats, collection, door_objs=None):
         y_in_d = -side * (0.084 if is_rear else 0.072)
         x_back_c = -d_len + (0.145 if is_rear else 0.055)
         z_bot_c = 0.16 if is_rear else 0.11
-        # Кожаная обивка дверной карты (slot 0 = Leather)
+        # Кожаная основа дверной карты + нижний карман + мягкий подлокотник (slot 0 = Leather)
         add_box(bm_dc, x_back_c, -0.048,
                 y_in_d, y_in_d - side * 0.020, z_bot_c, 0.60)
-        # Выступающий кожаный подлокотник двери
-        add_box(bm_dc, x_back_c + 0.08, -0.14,
-                y_in_d - side * 0.022, y_in_d - side * 0.064, 0.34, 0.405)
-        # Декоративная планка Piano_Black (slot 1)
-        f_pb0 = len(bm_dc.faces)
-        add_box(bm_dc, x_back_c + 0.03, -0.08,
-                y_in_d - side * 0.022, y_in_d - side * 0.030, 0.505, 0.545)
+        add_box(bm_dc, x_back_c + 0.05, -0.10,
+                y_in_d - side * 0.022, y_in_d - side * 0.044, z_bot_c + 0.01, z_bot_c + 0.14)
+        add_box(bm_dc, x_back_c + 0.08, -0.13,
+                y_in_d - side * 0.022, y_in_d - side * 0.068, 0.34, 0.405)
+        # Декоративная планка из скандинавского шпона Linear Walnut (slot 1 = Wood)
+        f_wd0 = len(bm_dc.faces)
+        add_box(bm_dc, x_back_c + 0.04, -0.08,
+                y_in_d - side * 0.022, y_in_d - side * 0.032, 0.495, 0.548)
+        f_wd1 = len(bm_dc.faces)
+        # Глянцевый блок стеклоподъёмников + тёмная ниша внутренней ручки (slot 2)
+        add_box(bm_dc, -0.34, -0.17,
+                y_in_d - side * 0.032, y_in_d - side * 0.062, 0.406, 0.418)
+        add_box(bm_dc, -0.28, -0.13,
+                y_in_d - side * 0.021, y_in_d - side * 0.027, 0.478, 0.525)
         f_pb1 = len(bm_dc.faces)
-        # Внутренняя хромированная ручка открывания двери (slot 2 = Chrome)
+        # Хром-кант под шпоном, ручка открывания и клавиши стеклоподъёмников (slot 3)
+        add_box(bm_dc, x_back_c + 0.04, -0.08,
+                y_in_d - side * 0.024, y_in_d - side * 0.034, 0.486, 0.494)
         add_box(bm_dc, -0.26, -0.15,
-                y_in_d - side * 0.023, y_in_d - side * 0.040, 0.485, 0.515)
+                y_in_d - side * 0.028, y_in_d - side * 0.045, 0.488, 0.514)
+        for sw_x in (-0.30, -0.26, -0.22):
+            add_box(bm_dc, sw_x - 0.010, sw_x + 0.010,
+                    y_in_d - side * 0.040, y_in_d - side * 0.056, 0.418, 0.425)
         bm_dc.faces.ensure_lookup_table()
-        for fi in range(f_pb0, f_pb1):
+        for fi in range(f_wd0, f_wd1):
             bm_dc.faces[fi].material_index = 1
-        for fi in range(f_pb1, len(bm_dc.faces)):
+        for fi in range(f_wd1, f_pb1):
             bm_dc.faces[fi].material_index = 2
+        for fi in range(f_pb1, len(bm_dc.faces)):
+            bm_dc.faces[fi].material_index = 3
         card_name = d_name.replace('Door_', 'Door_Card_')
         dc_ob = bmesh_to_object(card_name, bm_dc, material=mats['leather'],
-                                smooth=True, collection=collection, bevel=0.004, bevel_segs=2)
+                                smooth=True, collection=collection, bevel=0.0035, bevel_segs=2)
+        dc_ob.data.materials.append(mats['wood'])
         dc_ob.data.materials.append(mats['piano_black'])
         dc_ob.data.materials.append(mats['chrome'])
         uv_box(dc_ob, scale=2.5)
@@ -2852,39 +3195,142 @@ def build_doors(body_ob, mats, collection):
         dh_ob.matrix_parent_inverse = body_ob.matrix_world.inverted()
 
         # 5. Наружная дверная ручка Volvo S90 (корпус в цвет кузова + верхняя хром-планка)
-        bm_hdl = bmesh.new()
-        x_hdl_w = hx - door_len + 0.18
-        z_hdl_w = BELT(x_hdl_w) - 0.115
+        # 5. Полностью отделённая дверная ручка-скоба Volvo S90 Inscription:
+        #    (a) Door_Handle_Base_* — неподвижная теневая чашка под пальцы + задняя крышка
+        #        личинки замка (key-cap) с технологическим швом 4 мм;
+        #    (b) Door_Handle_* — самостоятельная подвижная рукоятка (origin в переднем шарнире!)
+        #        с изогнутым 7-секционным loft-профилем, реальным просветом 22 мм для пальцев
+        #        и контурной хромированной накладкой сверху!
+        x_hdl_w = hx - door_len + 0.20
+        z_hdl_w = BELT(x_hdl_w) - 0.112
         y_surf_w = side * side_surface_y(x_hdl_w, z_hdl_w)
         xh_l = x_hdl_w - hx
         yh_l = y_surf_w - hinge_y
         zh_l = z_hdl_w - hinge_z
-        # Стойки ручки + основная рукоятка в цвет кузова (material_index = 0)
-        add_box(bm_hdl, xh_l - 0.082, xh_l + 0.082,
-                yh_l + side * 0.014, yh_l + side * 0.027, zh_l - 0.012, zh_l + 0.008)
-        add_box(bm_hdl, xh_l - 0.075, xh_l - 0.052,
-                yh_l - side * 0.002, yh_l + side * 0.013, zh_l - 0.010, zh_l + 0.008)
-        add_box(bm_hdl, xh_l + 0.052, xh_l + 0.075,
-                yh_l - side * 0.002, yh_l + side * 0.013, zh_l - 0.010, zh_l + 0.008)
+
+        # 5a. Неподвижная база ручки (чашка под пальцы + прокладки + задняя крышка личинки)
+        bm_hb = bmesh.new()
+        # Задняя крышка личинки замка (key-cap, slot 0 = Paint), отделена швом 4 мм от ручки
+        add_box(bm_hb, -0.098, -0.058,
+                side * 0.002, side * 0.025, -0.014, +0.011)
+        n_hb_paint = len(bm_hb.faces)
+        # Верхний хромированный штрих на крышке личинки (slot 2 = Chrome)
+        add_box(bm_hb, -0.096, -0.060,
+                side * 0.016, side * 0.027, +0.0115, +0.0165)
+        n_hb_chr = len(bm_hb.faces)
+        # Утопленная тёмная чашка-подложка под пальцы + резиновые прокладки (slot 1 = Piano_Black)
+        add_box(bm_hb, -0.052, +0.064,
+                -side * 0.001, side * 0.0045, -0.022, +0.018)
+        # Резиновая прокладка под крышкой личинки и под передним шарниром
+        add_box(bm_hb, -0.101, -0.055,
+                -side * 0.001, side * 0.004, -0.016, +0.017)
+        add_box(bm_hb, +0.064, +0.096,
+                -side * 0.001, side * 0.004, -0.016, +0.017)
+        bm_hb.faces.ensure_lookup_table()
+        for f_idx in range(n_hb_paint, n_hb_chr):
+            bm_hb.faces[f_idx].material_index = 2
+        for f_idx in range(n_hb_chr, len(bm_hb.faces)):
+            bm_hb.faces[f_idx].material_index = 1
+        base_name = name.replace('Door_', 'Door_Handle_Base_')
+        hb_ob = bmesh_to_object(base_name, bm_hb, material=mats['paint'],
+                                smooth=True, collection=collection, auto_smooth_deg=55.0,
+                                bevel=0.0018, bevel_segs=2)
+        hb_ob.data.materials.append(mats['piano_black'])
+        hb_ob.data.materials.append(mats['chrome'])
+        uv_box(hb_ob, scale=10.0)
+        hb_ob.parent = door_ob
+        hb_ob.location = Vector((xh_l, yh_l, zh_l))
+
+        # 5b. Подвижная скульптурная рукоятка (origin строго в переднем шарнире: x = xh_l + 0.080!)
+        # Можно независимо поворачивать вокруг Z на ±12°, полностью отделена от двери!
+        piv_dx = 0.080
+        bm_hdl = bmesh.new()
+        # 7 сечений вдоль X относительно переднего шарнира (dx = 0 -> dx = -0.134)
+        # (dx, y_inner, y_outer, z_bot, z_top) — реальный сквозной просвет 21 мм по центру!
+        h_specs = [
+            (+0.012, +0.002, +0.023, -0.012, +0.011),
+            (-0.004, +0.015, +0.032, -0.013, +0.012),
+            (-0.030, +0.022, +0.038, -0.014, +0.012),
+            (-0.066, +0.024, +0.040, -0.014, +0.012),
+            (-0.102, +0.022, +0.038, -0.014, +0.012),
+            (-0.124, +0.014, +0.031, -0.013, +0.012),
+            (-0.134, +0.002, +0.024, -0.012, +0.011),
+        ]
+        h_rings = []
+        for dx, yi, yo, zb, zt in h_specs:
+            zm = 0.5 * (zb + zt)
+            if side > 0:
+                ring = [
+                    bm_hdl.verts.new(Vector((dx, yi, zb))),
+                    bm_hdl.verts.new(Vector((dx, yo, zb))),
+                    bm_hdl.verts.new(Vector((dx, yo + 0.002, zm))),
+                    bm_hdl.verts.new(Vector((dx, yo, zt))),
+                    bm_hdl.verts.new(Vector((dx, yi, zt))),
+                ]
+            else:
+                ring = [
+                    bm_hdl.verts.new(Vector((dx, -yi, zb))),
+                    bm_hdl.verts.new(Vector((dx, -yi, zt))),
+                    bm_hdl.verts.new(Vector((dx, -yo, zt))),
+                    bm_hdl.verts.new(Vector((dx, -(yo + 0.002), zm))),
+                    bm_hdl.verts.new(Vector((dx, -yo, zb))),
+                ]
+            h_rings.append(ring)
+        for i_h in range(len(h_rings) - 1):
+            r0, r1 = h_rings[i_h], h_rings[i_h + 1]
+            for k in range(5):
+                kn = (k + 1) % 5
+                bm_hdl.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
+        # Торцы квадами + треугольником (0 n-gons)
+        for end_r, rev in ((h_rings[0], True), (h_rings[-1], False)):
+            if rev:
+                bm_hdl.faces.new((end_r[0], end_r[4], end_r[3], end_r[1]))
+                bm_hdl.faces.new((end_r[1], end_r[3], end_r[2]))
+            else:
+                bm_hdl.faces.new((end_r[0], end_r[1], end_r[3], end_r[4]))
+                bm_hdl.faces.new((end_r[1], end_r[2], end_r[3]))
+        # Передняя и задняя опорные лапки (входят в прокладки двери)
+        add_box(bm_hdl, -0.006, +0.010,
+                -side * 0.002, side * 0.014, -0.010, +0.009)
+        add_box(bm_hdl, -0.133, -0.118,
+                -side * 0.002, side * 0.014, -0.010, +0.009)
+
+        # Изогнутая верхняя хромированная полоса S90 Inscription (slot 1 = Chrome)
         n_paint_faces = len(bm_hdl.faces)
-        # Верхняя тонкая хромированная планка S90 Inscription (material_index = 1)
-        add_box(bm_hdl, xh_l - 0.078, xh_l + 0.078,
-                yh_l + side * 0.016, yh_l + side * 0.029, zh_l + 0.0085, zh_l + 0.014)
+        c_rings = []
+        for dx, yi, yo, _zb, zt in h_specs:
+            y_ci = side * (yi + 0.004)
+            y_co = side * (yo + 0.002)
+            y0_c, y1_c = (y_ci, y_co) if y_ci < y_co else (y_co, y_ci)
+            c_rings.append([
+                bm_hdl.verts.new(Vector((dx, y0_c, zt + 0.0006))),
+                bm_hdl.verts.new(Vector((dx, y1_c, zt + 0.0006))),
+                bm_hdl.verts.new(Vector((dx, y1_c, zt + 0.0052))),
+                bm_hdl.verts.new(Vector((dx, y0_c, zt + 0.0052))),
+            ])
+        for i_c in range(len(c_rings) - 1):
+            r0, r1 = c_rings[i_c], c_rings[i_c + 1]
+            for k in range(4):
+                kn = (k + 1) % 4
+                bm_hdl.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
+        bm_hdl.faces.new((c_rings[0][0], c_rings[0][3], c_rings[0][2], c_rings[0][1]))
+        bm_hdl.faces.new((c_rings[-1][0], c_rings[-1][1], c_rings[-1][2], c_rings[-1][3]))
+
         bm_hdl.faces.ensure_lookup_table()
         for f_idx in range(n_paint_faces, len(bm_hdl.faces)):
             bm_hdl.faces[f_idx].material_index = 1
         handle_name = name.replace('Door_', 'Door_Handle_')
         hdl_ob = bmesh_to_object(handle_name, bm_hdl, material=mats['paint'],
                                  smooth=True, collection=collection, auto_smooth_deg=55.0,
-                                 bevel=0.0020, bevel_segs=2)
+                                 bevel=0.0018, bevel_segs=2)
         hdl_ob.data.materials.append(mats['chrome'])
         uv_box(hdl_ob, scale=10.0)
         hdl_ob.parent = door_ob
-        hdl_ob.location = Vector((0.0, 0.0, 0.0))
+        hdl_ob.location = Vector((xh_l + piv_dx, yh_l, zh_l))
 
         # 6. Обтекаемое двухцветное зеркало заднего вида Volvo S90 (на передней двери):
-        # слот 0 = Paint (верхняя крышка), слот 1 = Piano_Black (ножка + нижняя чаша),
-        # слот 2 = Chrome (зеркальное полотно сзади), слот 3 = DRL (LED-повторитель поворотника)
+        # слот 0 = Paint (верхняя крышка), слот 1 = Piano_Black (ножка + нижняя чаша + безель),
+        # слот 2 = Chrome (зеркальное полотно сзади), слот 3 = Amber_LED (повторитель поворотника)
         if is_front:
             m_tag = 'L' if side > 0 else 'R'
             xm_w = hx - 0.16
@@ -2895,29 +3341,29 @@ def build_doors(body_ob, mats, collection):
             zm_l = zm_w - hinge_z
             bm_mir = bmesh.new()
 
-            # 6a. Чёрная глянцевая ножка-флажок на полотне двери (slot 1 = Piano_Black)
+            # 6a. Чёрная глянцевая аэродинамическая ножка-флажок на двери (slot 1 = Piano_Black)
             stalk_pts = [
                 Vector((xm_l, ym_l - side * 0.006, zm_l)),
-                Vector((xm_l - 0.016, ym_l + side * 0.034, zm_l + 0.026)),
-                Vector((xm_l - 0.030, ym_l + side * 0.058, zm_l + 0.050)),
+                Vector((xm_l - 0.016, ym_l + side * 0.036, zm_l + 0.026)),
+                Vector((xm_l - 0.030, ym_l + side * 0.062, zm_l + 0.050)),
             ]
-            _sweep_rect_tube(bm_mir, stalk_pts, half_y=0.014, half_n=0.013)
-            # Основание-треугольник ножки на двери
-            add_box(bm_mir, xm_l - 0.032, xm_l + 0.026,
-                    ym_l - side * 0.004, ym_l + side * 0.010, zm_l - 0.014, zm_l + 0.014)
+            _sweep_rect_tube(bm_mir, stalk_pts, half_y=0.013, half_n=0.012)
+            # Скульптурный подиум-основание ножки на двери
+            add_box(bm_mir, xm_l - 0.036, xm_l + 0.028,
+                    ym_l - side * 0.004, ym_l + side * 0.011, zm_l - 0.013, zm_l + 0.015)
             bm_mir.faces.ensure_lookup_table()
             for f_st in bm_mir.faces:
                 f_st.material_index = 1
 
             # 6b. Скульптурный каплевидный корпус (верх = Paint [0], низ = Piano_Black [1])
-            n_before_cap = len(bm_mir.faces)
             m_rings = []
             m_specs = [
                 (0.048, -0.044, +0.050, +0.028, +0.092),
-                (0.085, -0.058, +0.054, +0.022, +0.104),
-                (0.130, -0.056, +0.042, +0.026, +0.100),
-                (0.172, -0.046, +0.018, +0.034, +0.088),
-                (0.194, -0.032, -0.004, +0.044, +0.074),
+                (0.075, -0.056, +0.055, +0.023, +0.103),
+                (0.108, -0.059, +0.052, +0.022, +0.104),
+                (0.144, -0.056, +0.038, +0.026, +0.098),
+                (0.178, -0.045, +0.014, +0.035, +0.087),
+                (0.198, -0.030, -0.006, +0.045, +0.073),
             ]
             for dy_off, dx0, dx1, dz0, dz1 in m_specs:
                 yy = ym_l + side * dy_off
@@ -2926,7 +3372,7 @@ def build_doors(body_ob, mats, collection):
                     ring = [
                         bm_mir.verts.new(Vector((xm_l + dx0, yy, zm_l + dz0))),
                         bm_mir.verts.new(Vector((xm_l + dx1, yy, zm_l + dz0))),
-                        bm_mir.verts.new(Vector((xm_l + dx1 + 0.006, yy, zm_l + dz_mid))),
+                        bm_mir.verts.new(Vector((xm_l + dx1 + 0.007, yy, zm_l + dz_mid))),
                         bm_mir.verts.new(Vector((xm_l + dx1, yy, zm_l + dz1))),
                         bm_mir.verts.new(Vector((xm_l + dx0, yy, zm_l + dz1))),
                         bm_mir.verts.new(Vector((xm_l + dx0 - 0.003, yy, zm_l + dz_mid))),
@@ -2937,7 +3383,7 @@ def build_doors(body_ob, mats, collection):
                         bm_mir.verts.new(Vector((xm_l + dx0 - 0.003, yy, zm_l + dz_mid))),
                         bm_mir.verts.new(Vector((xm_l + dx0, yy, zm_l + dz1))),
                         bm_mir.verts.new(Vector((xm_l + dx1, yy, zm_l + dz1))),
-                        bm_mir.verts.new(Vector((xm_l + dx1 + 0.006, yy, zm_l + dz_mid))),
+                        bm_mir.verts.new(Vector((xm_l + dx1 + 0.007, yy, zm_l + dz_mid))),
                         bm_mir.verts.new(Vector((xm_l + dx1, yy, zm_l + dz0))),
                     ]
                 m_rings.append(ring)
@@ -2947,10 +3393,8 @@ def build_doors(body_ob, mats, collection):
                 for k in range(n_r):
                     kn = (k + 1) % n_r
                     f_m = bm_mir.faces.new((r0[k], r0[kn], r1[kn], r1[k]))
-                    # Нижние грани корпуса (z < середины) -> Piano_Black, верхняя крышка -> Paint
                     z_fc = f_m.calc_center_median().z
                     f_m.material_index = 1 if z_fc < (zm_l + 0.056) else 0
-            # Торцевые заглушки (квадами — без n-gon!)
             for end_ring, rev in ((m_rings[0], True), (m_rings[-1], False)):
                 if rev:
                     f_a = bm_mir.faces.new((end_ring[0], end_ring[5], end_ring[2], end_ring[1]))
@@ -2961,29 +3405,33 @@ def build_doors(body_ob, mats, collection):
                 f_a.material_index = 1
                 f_b.material_index = 0
 
-            # 6c. Зеркальное стекло с тыльной стороны корпуса (slot 2 = Chrome)
+            # 6c. Внутренний чёрный ободок + зеркальное полотно (slot 1 -> slot 2)
+            n_bef_bez = len(bm_mir.faces)
+            add_box(bm_mir, xm_l - 0.061, xm_l - 0.054,
+                    ym_l + side * 0.058, ym_l + side * 0.180, zm_l + 0.029, zm_l + 0.095)
             n_before_glass = len(bm_mir.faces)
-            add_box(bm_mir, xm_l - 0.062, xm_l - 0.055,
-                    ym_l + side * 0.062, ym_l + side * 0.175, zm_l + 0.032, zm_l + 0.092)
+            add_box(bm_mir, xm_l - 0.064, xm_l - 0.059,
+                    ym_l + side * 0.064, ym_l + side * 0.174, zm_l + 0.034, zm_l + 0.090)
             bm_mir.faces.ensure_lookup_table()
+            for f_idx in range(n_bef_bez, n_before_glass):
+                bm_mir.faces[f_idx].material_index = 1
             for f_idx in range(n_before_glass, len(bm_mir.faces)):
                 bm_mir.faces[f_idx].material_index = 2
 
-            # 6d. Тонкая LED-полоска повторителя поворотника спереди корпуса (slot 3 = DRL)
+            # 6d. Тонкая янтарная LED-полоска повторителя поворотника (slot 3 = Amber_LED)
             n_before_led = len(bm_mir.faces)
-            add_box(bm_mir, xm_l + 0.044, xm_l + 0.058,
-                    ym_l + side * 0.090, ym_l + side * 0.176, zm_l + 0.053, zm_l + 0.061)
+            add_box(bm_mir, xm_l + 0.044, xm_l + 0.060,
+                    ym_l + side * 0.088, ym_l + side * 0.180, zm_l + 0.052, zm_l + 0.060)
             bm_mir.faces.ensure_lookup_table()
             for f_idx in range(n_before_led, len(bm_mir.faces)):
                 bm_mir.faces[f_idx].material_index = 3
-            _ = n_before_cap
 
             mir_ob = bmesh_to_object(f'Mirror_{m_tag}', bm_mir, material=mats['paint'],
                                      smooth=True, collection=collection, auto_smooth_deg=55.0,
-                                     bevel=0.0020, bevel_segs=2, subsurf=1)
+                                     bevel=0.0018, bevel_segs=2, subsurf=1)
             mir_ob.data.materials.append(mats['piano_black'])
             mir_ob.data.materials.append(mats['chrome'])
-            mir_ob.data.materials.append(mats['drl'])
+            mir_ob.data.materials.append(mats['amber_led'])
             uv_box(mir_ob, scale=6.0)
             mir_ob.parent = door_ob
             mir_ob.location = Vector((0.0, 0.0, 0.0))
@@ -2992,7 +3440,7 @@ def build_doors(body_ob, mats, collection):
 
 
 def _sweep_rect_tube(bm, points, half_y, half_n):
-    """Замкнутая прямоугольная балка вдоль плоской (в XZ) ломаной points (для петель)."""
+    """Замкнутая прямоугольная балка вдоль 3D-ломаной points (безопасна для любых осей)."""
     rings = []
     n_pts = len(points)
     for idx, p in enumerate(points):
@@ -3005,13 +3453,14 @@ def _sweep_rect_tube(bm, points, half_y, half_n):
             t_next = (points[idx + 1] - points[idx]).normalized()
             tangent = (t_prev + t_next)
             tangent = tangent.normalized() if tangent.length > 1e-6 else t_next
-        side_y = Vector((0.0, 1.0, 0.0))
-        normal_xz = tangent.cross(side_y).normalized()
+        ref = Vector((0.0, 0.0, 1.0)) if abs(tangent.y) > 0.85 else Vector((0.0, 1.0, 0.0))
+        normal_xz = tangent.cross(ref).normalized()
+        side_v = normal_xz.cross(tangent).normalized()
         ring = [
-            bm.verts.new(p - side_y * half_y - normal_xz * half_n),
-            bm.verts.new(p + side_y * half_y - normal_xz * half_n),
-            bm.verts.new(p + side_y * half_y + normal_xz * half_n),
-            bm.verts.new(p - side_y * half_y + normal_xz * half_n),
+            bm.verts.new(p - side_v * half_y - normal_xz * half_n),
+            bm.verts.new(p + side_v * half_y - normal_xz * half_n),
+            bm.verts.new(p + side_v * half_y + normal_xz * half_n),
+            bm.verts.new(p - side_v * half_y + normal_xz * half_n),
         ]
         rings.append(ring)
 
@@ -3065,6 +3514,30 @@ def _add_y_cylinder(bm, radius, y0, y1, seg=16, center_xz=(0.0, 0.0)):
         bm.faces.new((rings[0][k], rings[0][kn], rings[1][kn], rings[1][k]))
     c0 = bm.verts.new(Vector((cx, y0, cz)))
     c1 = bm.verts.new(Vector((cx, y1, cz)))
+    for k in range(seg):
+        kn = (k + 1) % seg
+        bm.faces.new((c0, rings[0][kn], rings[0][k]))
+        bm.faces.new((c1, rings[1][k], rings[1][kn]))
+
+
+def _add_x_cylinder(bm, radius, x0, x1, seg=16, center_yz=(0.0, 0.0)):
+    """Добавляет замкнутый цилиндр вдоль оси X от x0 до x1."""
+    xa, xb = (x0, x1) if x0 <= x1 else (x1, x0)
+    cy, cz = center_yz
+    rings = []
+    for xx in (xa, xb):
+        ring = []
+        for i in range(seg):
+            a = 2.0 * math.pi * i / seg
+            ring.append(bm.verts.new(Vector((xx,
+                                             cy + radius * math.cos(a),
+                                             cz + radius * math.sin(a)))))
+        rings.append(ring)
+    for k in range(seg):
+        kn = (k + 1) % seg
+        bm.faces.new((rings[0][k], rings[0][kn], rings[1][kn], rings[1][k]))
+    c0 = bm.verts.new(Vector((xa, cy, cz)))
+    c1 = bm.verts.new(Vector((xb, cy, cz)))
     for k in range(seg):
         kn = (k + 1) % seg
         bm.faces.new((c0, rings[0][kn], rings[0][k]))
@@ -3624,7 +4097,8 @@ def build_hood(body_ob, mats, collection):
 # 7. Свет, студия (коллекция Studio), мир, камеры
 # --------------------------------------------------------------------------- #
 def add_light(name, loc, energy, size=0.8, size_y=None, rot=None,
-              aim_target=None, color=(1.0, 1.0, 1.0), collection=None):
+              aim_target=None, color=(1.0, 1.0, 1.0), collection=None,
+              hide_direct=False):
     ld = bpy.data.lights.new(name, 'AREA')
     ld.energy = energy
     ld.color = color
@@ -3640,6 +4114,10 @@ def add_light(name, loc, energy, size=0.8, size_y=None, rot=None,
         look_at(ob, aim_target)
     elif rot is not None:
         ob.rotation_euler = rot
+    if hide_direct:
+        ob.visible_camera = False
+        ob.visible_transmission = False
+        ob.visible_glossy = False
     target_col = collection if collection is not None else bpy.context.scene.collection
     target_col.objects.link(ob)
     return ob
@@ -4105,13 +4583,22 @@ def build_volvo_details(body_ob, mats, collection):
         ey = sy * 0.44
         ex_s = rear_tail_surface_x(ey) - 0.014
         bm_ex = bmesh.new()
-        # Трапециевидный хромированный патрубок, утопленный заподлицо в диффузор
-        add_box(bm_ex, ex_s - 0.012, ex_s + 0.036, ey - 0.070, ey + 0.070, 0.315, 0.330)
-        add_box(bm_ex, ex_s - 0.012, ex_s + 0.036, ey - 0.062, ey + 0.062, 0.262, 0.277)
-        add_box(bm_ex, ex_s - 0.012, ex_s + 0.036, ey - 0.072, ey - 0.058, 0.279, 0.313)
-        add_box(bm_ex, ex_s - 0.012, ex_s + 0.036, ey + 0.058, ey + 0.072, 0.279, 0.313)
+        # Трапециевидный хромированный патрубок с центральной перегородкой (slot 0 = Chrome)
+        add_box(bm_ex, ex_s - 0.014, ex_s + 0.040, ey - 0.072, ey + 0.072, 0.316, 0.330)
+        add_box(bm_ex, ex_s - 0.014, ex_s + 0.040, ey - 0.064, ey + 0.064, 0.262, 0.276)
+        add_box(bm_ex, ex_s - 0.014, ex_s + 0.040, ey - 0.074, ey - 0.060, 0.278, 0.314)
+        add_box(bm_ex, ex_s - 0.014, ex_s + 0.040, ey + 0.060, ey + 0.074, 0.278, 0.314)
+        # Внутренняя тёмная выхлопная труба и глубина канала (slot 1 = Carbon)
+        n_ex_chr = len(bm_ex.faces)
+        add_box(bm_ex, ex_s + 0.012, ex_s + 0.042, ey - 0.056, ey + 0.056, 0.278, 0.314)
+        _add_x_cylinder(bm_ex, 0.019, ex_s - 0.002, ex_s + 0.022, seg=18,
+                        center_yz=(ey, 0.296))
+        bm_ex.faces.ensure_lookup_table()
+        for fi in range(n_ex_chr, len(bm_ex.faces)):
+            bm_ex.faces[fi].material_index = 1
         ex_ob = bmesh_to_object(f'Exhaust_{label}', bm_ex, material=mats['chrome'],
-                                smooth=True, collection=collection, bevel=0.0022)
+                                smooth=True, collection=collection, bevel=0.0020)
+        ex_ob.data.materials.append(mats['carbon'])
         uv_box(ex_ob, scale=8.0)
         objs.append(ex_ob)
 
@@ -4124,6 +4611,85 @@ def build_volvo_details(body_ob, mats, collection):
                                  smooth=True, collection=collection, bevel=0.002)
         uv_box(ref_ob, scale=8.0)
         objs.append(ref_ob)
+
+    # 5a. Мелкие заводские детали бамперов: датчики парктроника (PDC) и крышки омывателей фар
+    bm_pdc_f = bmesh.new()
+    for py_s in (-0.54, -0.26, +0.26, +0.54):
+        sx_s = _surf_x(py_s, 0.465, front=True)
+        # Тонкое чёрное уплотнительное кольцо + датчик заподлицо в бампере
+        _add_x_cylinder(bm_pdc_f, 0.0115, sx_s - 0.004, sx_s + 0.0035, seg=14,
+                        center_yz=(py_s, 0.465))
+    n_pdc_f_ring = len(bm_pdc_f.faces)
+    for py_s in (-0.54, -0.26, +0.26, +0.54):
+        sx_s = _surf_x(py_s, 0.465, front=True)
+        _add_x_cylinder(bm_pdc_f, 0.0085, sx_s - 0.002, sx_s + 0.0050, seg=14,
+                        center_yz=(py_s, 0.465))
+    bm_pdc_f.faces.ensure_lookup_table()
+    for fi in range(n_pdc_f_ring, len(bm_pdc_f.faces)):
+        bm_pdc_f.faces[fi].material_index = 1
+    pdc_f_ob = bmesh_to_object('PDC_Sensors_Front', bm_pdc_f, material=mats['piano_black'],
+                               smooth=True, collection=collection)
+    pdc_f_ob.data.materials.append(mats['bumper'])
+    uv_box(pdc_f_ob, scale=12.0)
+    objs.append(pdc_f_ob)
+
+    # Крышки омывателей фар (Headlight_Washers) на переднем бампере прямо под фарами
+    bm_hw = bmesh.new()
+    for sy_w in (-1.0, +1.0):
+        ya_w, yb_w = sorted((sy_w * 0.50, sy_w * 0.585))
+        _add_curved_strip(bm_hw, ya_w, yb_w, 0.488, 0.518, front=True,
+                          off_out=0.006, thick=0.009, ny=5, nz=2)
+    hw_ob = bmesh_to_object('Headlight_Washers', bm_hw, material=mats['bumper'],
+                            smooth=True, collection=collection, bevel=0.0015, bevel_segs=1)
+    uv_box(hw_ob, scale=10.0)
+    objs.append(hw_ob)
+
+    # Задние датчики парктроника (PDC_Sensors_Rear) заподлицо с наружной стенкой заднего бампера
+    bm_pdc_r = bmesh.new()
+    for py_s in (-0.54, -0.22, +0.22, +0.54):
+        sx_s = rear_tail_surface_x(py_s)
+        _add_x_cylinder(bm_pdc_r, 0.0115, sx_s - 0.047, sx_s - 0.035, seg=14,
+                        center_yz=(py_s, 0.495))
+    n_pdc_r_ring = len(bm_pdc_r.faces)
+    for py_s in (-0.54, -0.22, +0.22, +0.54):
+        sx_s = rear_tail_surface_x(py_s)
+        _add_x_cylinder(bm_pdc_r, 0.0085, sx_s - 0.0485, sx_s - 0.037, seg=14,
+                        center_yz=(py_s, 0.495))
+    bm_pdc_r.faces.ensure_lookup_table()
+    for fi in range(n_pdc_r_ring, len(bm_pdc_r.faces)):
+        bm_pdc_r.faces[fi].material_index = 1
+    pdc_r_ob = bmesh_to_object('PDC_Sensors_Rear', bm_pdc_r, material=mats['piano_black'],
+                               smooth=True, collection=collection)
+    pdc_r_ob.data.materials.append(mats['bumper'])
+    uv_box(pdc_r_ob, scale=12.0)
+    objs.append(pdc_r_ob)
+
+    # Широко расставленная фирменная хромированная надпись V O L V O строго НАД планкой номера
+    # (при взгляде сзади слева -> направо это от +Y к -Y!)
+    bm_tb = bmesh.new()
+    z_tb = 0.922
+    for y_ch, kind in ((+0.20, 'V'), (+0.10, 'O'), (0.0, 'L'), (-0.10, 'V'), (-0.20, 'O')):
+        sx_ch = rear_tail_surface_x(y_ch) - 0.017
+        x0_c, x1_c = sx_ch - 0.0065, sx_ch + 0.0035
+        if kind == 'O':
+            add_box(bm_tb, x0_c, x1_c, y_ch - 0.012, y_ch + 0.012, z_tb + 0.009, z_tb + 0.013)
+            add_box(bm_tb, x0_c, x1_c, y_ch - 0.012, y_ch + 0.012, z_tb - 0.013, z_tb - 0.009)
+            add_box(bm_tb, x0_c, x1_c, y_ch - 0.012, y_ch - 0.0085, z_tb - 0.008, z_tb + 0.008)
+            add_box(bm_tb, x0_c, x1_c, y_ch + 0.0085, y_ch + 0.012, z_tb - 0.008, z_tb + 0.008)
+        elif kind == 'L':
+            add_box(bm_tb, x0_c, x1_c, y_ch + 0.008, y_ch + 0.012, z_tb - 0.013, z_tb + 0.013)
+            add_box(bm_tb, x0_c, x1_c, y_ch - 0.011, y_ch + 0.007, z_tb - 0.013, z_tb - 0.009)
+        else:  # 'V'
+            p_l = [Vector((0.5 * (x0_c + x1_c), y_ch + 0.011, z_tb + 0.013)),
+                   Vector((0.5 * (x0_c + x1_c), y_ch + 0.001, z_tb - 0.013))]
+            p_r = [Vector((0.5 * (x0_c + x1_c), y_ch - 0.011, z_tb + 0.013)),
+                   Vector((0.5 * (x0_c + x1_c), y_ch - 0.001, z_tb - 0.013))]
+            _sweep_rect_tube(bm_tb, p_l, half_y=0.0022, half_n=0.0032)
+            _sweep_rect_tube(bm_tb, p_r, half_y=0.0022, half_n=0.0032)
+    tb_ob = bmesh_to_object('Trunk_Badge', bm_tb, material=mats['chrome'],
+                            smooth=True, collection=collection, bevel=0.0008, bevel_segs=1)
+    uv_box(tb_ob, scale=15.0)
+    objs.append(tb_ob)
 
     # 5b. Контрастные накладки порогов (Side_Skirt_L/R, в тон съёмным антрацитовым бамперам):
     # плавное сужение концов у арок — органично вписаны в нижнюю линию кузова без торчащих торцов
@@ -4244,21 +4810,26 @@ def build_volvo_details(body_ob, mats, collection):
 
 
 def build_lighting(mats, studio_col):
-    # Интерьер: потолочные лампы смотрят строго вниз (-Z при rot=(0, 0, 0))
-    add_light('Int_RoofLight_F', (0.35, 0.0, 1.32), 1.9, size=0.35,
-              rot=(0.0, 0.0, 0.0), collection=studio_col)
-    add_light('Int_RoofLight_M', (-0.45, 0.0, 1.32), 2.1, size=0.35,
-              rot=(0.0, 0.0, 0.0), collection=studio_col)
-    add_light('Int_SeatLight', (0.0, 0.35, 0.72), 1.7, size=0.20,
-              aim_target=(0.0, 0.0, 0.45), collection=studio_col)
-    add_light('Int_DashLight', (0.65, 0.0, 1.05), 0.9, size=0.25,
-              aim_target=(0.95, 0.0, 0.75), collection=studio_col)
-    add_light('Int_Ceiling', (-0.05, 0.0, 1.30), 0.9, size=0.40,
-              rot=(0.0, 0.0, 0.0), collection=studio_col)
+    # Интерьер: потолочные лампы смотрят строго вниз (-Z); hide_direct=True убирает
+    # видимые прямоугольники ламп в лобовом и боковых стёклах на экстерьерных рендерах!
+    add_light('Int_RoofLight_F', (0.35, 0.0, 1.30), 3.4, size=0.40,
+              rot=(0.0, 0.0, 0.0), color=(1.0, 0.98, 0.95),
+              collection=studio_col, hide_direct=True)
+    add_light('Int_RoofLight_M', (-0.45, 0.0, 1.30), 3.2, size=0.40,
+              rot=(0.0, 0.0, 0.0), color=(1.0, 0.98, 0.95),
+              collection=studio_col, hide_direct=True)
+    add_light('Int_SeatLight', (0.05, 0.25, 0.85), 2.4, size=0.28,
+              aim_target=(0.35, 0.0, 0.55), color=(0.98, 0.98, 1.0),
+              collection=studio_col, hide_direct=True)
+    add_light('Int_DashLight', (0.35, 0.0, 1.08), 2.2, size=0.35,
+              aim_target=(0.75, 0.0, 0.78), color=(0.98, 0.99, 1.0),
+              collection=studio_col, hide_direct=True)
+    add_light('Int_Ceiling', (-0.05, 0.0, 1.28), 1.4, size=0.45,
+              rot=(0.0, 0.0, 0.0), collection=studio_col, hide_direct=True)
     add_light('Int_TrunkLight', (-1.78, 0.0, 1.02), 3.2, size=0.32,
-              rot=(0.0, 0.0, 0.0), collection=studio_col)
+              rot=(0.0, 0.0, 0.0), collection=studio_col, hide_direct=True)
     add_light('Int_EngineLight', (1.65, 0.0, 1.12), 6.5, size=0.45,
-              rot=(0.0, 0.0, 0.0), collection=studio_col)
+              rot=(0.0, 0.0, 0.0), collection=studio_col, hide_direct=True)
 
     # Автомобильная фотостудия: длинные мягкие софтбоксы-ленты (стрипы) для плавных бликов
     # Верхний продольный софтбокс — формирует цельную бликовую линию по крыше, плечу и капоту
@@ -4531,11 +5102,15 @@ def main(argv=None):
         'Fog_Light_L': front_bumper,
         'Fog_Light_R': front_bumper,
         'License_Plate_Front': front_bumper,
+        'PDC_Sensors_Front': front_bumper,
+        'Headlight_Washers': front_bumper,
         'Rear_Diffuser': rear_bumper,
         'Exhaust_L': rear_bumper,
         'Exhaust_R': rear_bumper,
         'Rear_Reflector_L': rear_bumper,
         'Rear_Reflector_R': rear_bumper,
+        'PDC_Sensors_Rear': rear_bumper,
+        'Trunk_Badge': trunk_lid,
         'Wheel_Arch_FL': fender_fl or body_ob,
         'Wheel_Arch_FR': fender_fr or body_ob,
         'Wheel_Arch_RL': fender_rl or body_ob,

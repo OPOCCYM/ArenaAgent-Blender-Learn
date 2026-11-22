@@ -64,6 +64,11 @@ def test_collections_and_bounding_box(built_scene_dir):
         'Door_Hinge_Rear_Left', 'Door_Hinge_Rear_Right',
         'Door_Handle_Front_Left', 'Door_Handle_Front_Right',
         'Door_Handle_Rear_Left', 'Door_Handle_Rear_Right',
+        'Door_Handle_Base_Front_Left', 'Door_Handle_Base_Front_Right',
+        'Door_Handle_Base_Rear_Left', 'Door_Handle_Base_Rear_Right',
+        'Center_Console', 'Dash_Trim', 'Instrument_Cluster', 'Air_Vents',
+        'Steering_Column', 'Pedals', 'Interior_Roof_Details', 'Cabin_Seats_Insert',
+        'PDC_Sensors_Front', 'Headlight_Washers', 'PDC_Sensors_Rear', 'Trunk_Badge',
         'Mirror_L', 'Mirror_R',
         'Hood_Lid', 'Engine_Bay', 'Engine_Metal', 'Coolant_Tank',
         'Fender_Front_L', 'Fender_Front_R', 'Front_Bumper',
@@ -123,11 +128,20 @@ def test_collections_and_bounding_box(built_scene_dir):
             f'{bmp_name} должен быть другого цвета, чем кузов'
         )
     # Детали переднего и заднего бамперов привязаны к соответствующим съёмным бамперам
-    for fb_child in ('Grille_Front', 'Grille_Chrome', 'Bumper_Intake_Front'):
+    for fb_child in ('Grille_Front', 'Grille_Chrome', 'Bumper_Intake_Front',
+                     'PDC_Sensors_Front', 'Headlight_Washers'):
         assert bpy.data.objects[fb_child].parent.name == 'Front_Bumper'
     for rb_child in ('Rear_Diffuser', 'Exhaust_L', 'Exhaust_R',
-                     'Rear_Reflector_L', 'Rear_Reflector_R'):
+                     'Rear_Reflector_L', 'Rear_Reflector_R', 'PDC_Sensors_Rear'):
         assert bpy.data.objects[rb_child].parent.name == 'Rear_Bumper'
+    assert bpy.data.objects['Trunk_Badge'].parent.name == 'Trunk_Lid'
+    # Дверные ручки полностью отделены от дверей и имеют собственный origin в шарнире ручки
+    for d_tag in ('Front_Left', 'Front_Right', 'Rear_Left', 'Rear_Right'):
+        hdl = bpy.data.objects[f'Door_Handle_{d_tag}']
+        hbase = bpy.data.objects[f'Door_Handle_Base_{d_tag}']
+        assert hdl.parent.name == f'Door_{d_tag}'
+        assert hbase.parent.name == f'Door_{d_tag}'
+        assert hdl.location.length > 0.30, f'{hdl.name} должна иметь собственный шарнир-origin'
     assert bpy.data.objects['Wheel_Arch_RL'].parent.name == 'Fender_Rear_L'
     assert bpy.data.objects['Wheel_Arch_RR'].parent.name == 'Fender_Rear_R'
 
