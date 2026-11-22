@@ -34,7 +34,8 @@
     {name:'Front three-quarter',file:'gr86_front_3_4.png',alt:'Front three-quarter view'},
     {name:'Side profile',file:'gr86_side.png',alt:'Side profile view'},
     {name:'Rear three-quarter',file:'gr86_rear_3_4.png',alt:'Rear three-quarter view'},
-    {name:'Cockpit',file:'gr86_cockpit.png',alt:'Cockpit view'}
+    {name:'Cockpit',file:'gr86_cockpit.png',alt:'Cockpit view'},
+    {name:'Panels open · hinge study',file:'gr86_panels_open.png',alt:'Hood, doors and trunk open to show separate hinged geometry'}
   ];
   let active=0; const img=document.querySelector('#large'),label=document.querySelector('#label'),grid=document.querySelector('#grid'),hero=document.querySelector('#hero');
   const cards=shots.map((s,i)=>{const b=document.createElement('button');b.className='shot';b.innerHTML=`<img src="../assets/renders/cycles/${s.file}" alt="${s.alt}" loading="lazy"><span>${s.name}</span>`;b.onclick=()=>select(i);grid.append(b);return b});
