@@ -100,6 +100,13 @@ class Obj:
             for yf,z in profile:
                 t=max(0.0,min(1.0,(z-.43)/.52))**2
                 zz=z+dz*t
+                # A restrained OEM shoulder crown adds the GR86's taut side surfacing
+                # without turning the body into a widebody or disturbing panel splits.
+                side_crown=0.0
+                if abs(yf)>.78 and .58<=z<=.84:
+                    shoulder=math.exp(-((z-.755)/.075)**2)
+                    longitudinal=0.82+0.18*math.cos(min(1.0,abs(x)/2.2)*math.pi/2)
+                    side_crown=0.014*shoulder*longitudinal
                 # Raise the outer lower body edge over each tyre to form open wheel arches.
                 if abs(yf)>.92 and z<=.51:
                     for wheel_x in (-1.2875,1.2875):
@@ -107,7 +114,7 @@ class Obj:
                         if dx<arch_r:
                             arch_z=.337+math.sqrt(max(0,arch_r*arch_r-dx*dx))
                             zz=max(zz,arch_z)
-                verts.append((x,yf*w,zz))
+                verts.append((x,yf*(w+side_crown),zz))
         n=len(profile); faces=[]
         for i in range(len(sections)-1):
             for j in range(n): faces.append((i*n+j,i*n+(j+1)%n,(i+1)*n+(j+1)%n,(i+1)*n+j))
