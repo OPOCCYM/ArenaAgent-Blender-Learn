@@ -107,6 +107,14 @@ class Obj:
                     shoulder=math.exp(-((z-.755)/.075)**2)
                     longitudinal=0.82+0.18*math.cos(min(1.0,abs(x)/2.2)*math.pi/2)
                     side_crown=0.014*shoulder*longitudinal
+                # Very shallow paired hood character lines, confined to the bonnet
+                # and fading before the cowl and nose (OEM, not raised aftermarket vents).
+                hood_line=0.0
+                if -1.92<x<-.78 and z>.90 and abs(yf)<.72:
+                    across=math.exp(-((abs(yf)-.57)/.055)**2)
+                    along=math.sin(math.pi*(x+1.92)/1.14)**0.5
+                    hood_line=.007*across*along
+                zz += hood_line
                 # Raise the outer lower body edge over each tyre to form open wheel arches.
                 if abs(yf)>.92 and z<=.51:
                     for wheel_x in (-1.2875,1.2875):
