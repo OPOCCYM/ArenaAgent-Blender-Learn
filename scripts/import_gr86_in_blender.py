@@ -279,6 +279,23 @@ def build_parametric_shell():
         pillar(f'A_Pillar_{side:+d}',-.88,-.56,width=.020)
         pillar(f'B_Pillar_{side:+d}',.12,.12,width=.018)
         pillar(f'C_Pillar_{side:+d}',.91,.55,width=.024)
+        # A distinct raised roof-edge rail and fine black reveal make the floating roof
+        # panel boundary legible; rails land directly on the tops of A/C pillars.
+        for rail_name, y_offset, bevel, mat in (
+            (f'Roof_Panel_Reveal_{side:+d}',0.0,.0025,material('Roof_Reveal',(.012,.016,.021),.12,.32)),
+            (f'Roof_Rail_{side:+d}',side*.022,.010,bpy.data.materials['Pearl_White'])):
+            data=bpy.data.curves.new(rail_name+'_Curve','CURVE'); data.dimensions='3D'
+            data.bevel_depth=bevel; data.bevel_resolution=3; data.resolution_u=2
+            spline=data.splines.new('POLY'); spline.points.add(32)
+            for i,point in enumerate(spline.points):
+                x=-.56+1.09*i/32
+                w=smooth_curve(CURVES['roof_width'],x)
+                z=smooth_curve(CURVES['top'],x)+.010
+                point.co=(x,side*(.925*w)+y_offset,z,1)
+            data.materials.append(mat)
+            rail=bpy.data.objects.new(rail_name,data); bpy.data.collections['GR86_Model'].objects.link(rail)
+            roof=bpy.data.objects['Roof_Panel']; rail.parent=roof
+            rail.matrix_parent_inverse=roof.matrix_world.inverted()
     # Curved front and rear windscreens: 2-D grids bowed gently across width and height.
     for name,xlo,xhi,zlo,zhi in [('Windscreen',-.93,-.56,.965,1.255),('Backlight',1.04,.55,.965,1.245)]:
         grid=[]

@@ -33,6 +33,15 @@ for name in ('Hood_Panel','Trunk_Lid','Roof_Panel','Front_Bumper','Rear_Bumper',
     panel=bpy.data.objects.get(name)
     assert panel and panel.type=='MESH' and len(panel.data.polygons)>20, f'missing separated body panel: {name}'
 assert body.dimensions.z>.8, body.dimensions[:]
+roof=bpy.data.objects['Roof_Panel']
+assert len(roof.data.polygons)>20 and roof.dimensions.x>.7 and roof.dimensions.y>.9, 'roof must be independent crown mesh'
+for side in (-1,1):
+    for prefix in ('A_Pillar_', 'B_Pillar_', 'C_Pillar_'):
+        pillar=bpy.data.objects.get(prefix+f'{side:+d}')
+        assert pillar and pillar.type=='MESH' and len(pillar.data.polygons)>0, f'missing roof support {prefix}{side}'
+    for prefix in ('Roof_Rail_', 'Roof_Panel_Reveal_'):
+        rail=bpy.data.objects.get(prefix+f'{side:+d}')
+        assert rail and rail.parent==roof, f'{prefix}{side} must follow separate roof panel'
 hood=bpy.data.objects['Hood_Panel']; trunk=bpy.data.objects['Trunk_Lid']
 assert hood.dimensions.x>.75 and hood.dimensions.y>1.2, f'hood skin must span the full bonnet: {hood.dimensions[:]}'
 assert trunk.dimensions.x>.75 and trunk.dimensions.y>1.2, f'trunk lid skin must span the full deck: {trunk.dimensions[:]}'
