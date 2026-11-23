@@ -343,6 +343,24 @@ def uv_face_x_minus(ob, mat_idx, y_left, y_right, z_bot, z_top):
                 uv[loop_idx].uv = (u, v)
 
 
+def uv_face_z_plus(ob, mat_idx, x_back, x_front, y_right, y_left):
+    """Точный 1:1 UV-маппинг верхней (+Z) грани таблички под капотом в [0..1]×[0..1],
+    читаемой при взгляде спереди (+X -> -X): слева y_right (-Y) -> справа y_left (+Y),
+    снизу x_front -> сверху x_back."""
+    me = ob.data
+    layer = me.uv_layers[0] if me.uv_layers else me.uv_layers.new(name='UVMap')
+    uv = layer.data
+    dy = y_left - y_right
+    dx = x_front - x_back
+    for poly in me.polygons:
+        if poly.material_index == mat_idx and poly.normal.z > 0.5:
+            for loop_idx in poly.loop_indices:
+                co = me.vertices[me.loops[loop_idx].vertex_index].co
+                u = clamp((co.y - y_right) / dy, 0.0, 1.0)
+                v = clamp((x_front - co.x) / dx, 0.0, 1.0)
+                uv[loop_idx].uv = (u, v)
+
+
 def look_at(obj, target):
     """Направляет локальную ось -Z объекта (камера / Area-лампа) на точку target."""
     direction = Vector(target) - obj.location
@@ -863,14 +881,20 @@ _FONT_5X7 = {
     '9': ("01110", "10001", "10001", "01111", "00001", "00010", "01100"),
     ':': ("00000", "00100", "00100", "00000", "00100", "00100", "00000"),
     '.': ("00000", "00000", "00000", "00000", "00000", "01100", "01100"),
+    '-': ("00000", "00000", "00000", "11111", "00000", "00000", "00000"),
+    '+': ("00000", "00100", "00100", "11111", "00100", "00100", "00000"),
     '/': ("00001", "00010", "00100", "00100", "01000", "10000", "00000"),
     '°': ("01100", "10010", "01100", "00000", "00000", "00000", "00000"),
     ' ': ("00000", "00000", "00000", "00000", "00000", "00000", "00000"),
+    'A': ("01110", "10001", "10001", "11111", "10001", "10001", "10001"),
     'B': ("11110", "10001", "10001", "11110", "10001", "10001", "11110"),
     'C': ("01110", "10001", "10000", "10000", "10000", "10001", "01110"),
     'D': ("11110", "10001", "10001", "10001", "10001", "10001", "11110"),
+    'E': ("11111", "10000", "10000", "11110", "10000", "10000", "11111"),
     'F': ("11111", "10000", "10000", "11110", "10000", "10000", "10000"),
+    'G': ("01110", "10001", "10000", "10111", "10001", "10001", "01110"),
     'H': ("10001", "10001", "10001", "11111", "10001", "10001", "10001"),
+    'I': ("01110", "00100", "00100", "00100", "00100", "00100", "01110"),
     'K': ("10001", "10010", "10100", "11000", "10100", "10010", "10001"),
     'L': ("10000", "10000", "10000", "10000", "10000", "10000", "11111"),
     'M': ("10001", "11011", "10101", "10001", "10001", "10001", "10001"),
@@ -883,6 +907,7 @@ _FONT_5X7 = {
     'U': ("10001", "10001", "10001", "10001", "10001", "10001", "01110"),
     'V': ("10001", "10001", "10001", "10001", "01010", "01010", "00100"),
     'W': ("10001", "10001", "10001", "10101", "10101", "11011", "10001"),
+    'Y': ("10001", "10001", "01010", "00100", "00100", "00100", "00100"),
     '&': ("01100", "10010", "01100", "10101", "10010", "10010", "01101"),
 }
 
@@ -1128,6 +1153,86 @@ def mat_cluster_ui():
     return _mat_oled_image('Cluster_Digital_UI', _build_cluster_ui_image(), emission_strength=1.55)
 
 
+def _build_engine_badge_image():
+    """Генерирует и упаковывает табличку крышки двигателя Volvo Drive-E T6 AWD (512×256)."""
+    w, h = 512, 256
+    buf = np.zeros((h, w, 4), dtype=np.float32)
+    buf[:, :, 3] = 1.0
+    # Шлифованный тёмный титан с горизонтальными микролиниями
+    yy, xx = np.mgrid[0:h, 0:w]
+    brush = 0.014 * np.sin(yy * 0.9) + 0.008 * np.sin(yy * 2.7)
+    buf[:, :, 0] = np.clip(0.085 + brush, 0.05, 0.14)
+    buf[:, :, 1] = np.clip(0.092 + brush, 0.05, 0.15)
+    buf[:, :, 2] = np.clip(0.105 + brush, 0.06, 0.17)
+    # Серебряная рамка по периметру
+    border = (xx < 12) | (xx >= w - 12) | (yy < 12) | (yy >= h - 12)
+    buf[border, :3] = (0.72, 0.76, 0.80)
+    inner_b = (
+        ((xx >= 12) & (xx < 18)) | ((xx >= w - 18) & (xx < w - 12))
+        | ((yy >= 12) & (yy < 18)) | ((yy >= h - 18) & (yy < h - 12))
+    )
+    buf[inner_b, :3] = (0.04, 0.045, 0.055)
+    # Фирменная голубая полоса Volvo/Polestar под логотипом
+    buf[118:130, 32:w - 32, :3] = (0.06, 0.56, 0.92)
+    # Верхняя надпись VOLVO (крупно с разрядкой)
+    _ui_draw_text(buf, 86, 36, "V O L V O", (0.94, 0.96, 0.99), scale=6)
+    # Основной шильдик мотора DRIVE-E T6 AWD
+    _ui_draw_text(buf, 48, 148, "DRIVE-E  T6  AWD", (0.92, 0.95, 0.98), scale=4)
+    # Подпись спецификации
+    _ui_draw_text(buf, 68, 198, "2.0L TURBO  316HP", (0.62, 0.72, 0.84), scale=3)
+    return _pack_ui_image('Engine_Badge_Tex', buf)
+
+
+def _build_engine_spec_image():
+    """Генерирует и упаковывает сервисную табличку подкапотного пространства (384×128)."""
+    w, h = 384, 128
+    buf = np.zeros((h, w, 4), dtype=np.float32)
+    buf[:, :, 3] = 1.0
+    buf[:, :, :3] = (0.03, 0.032, 0.038)
+    # Тонкая белая рамка
+    buf[4:8, 4:w - 4, :3] = (0.85, 0.86, 0.88)
+    buf[h - 8:h - 4, 4:w - 4, :3] = (0.85, 0.86, 0.88)
+    buf[4:h - 4, 4:8, :3] = (0.85, 0.86, 0.88)
+    buf[4:h - 4, w - 8:w - 4, :3] = (0.85, 0.86, 0.88)
+    # Левая жёлтая зона предупреждения с чёрным треугольником и восклицательным знаком
+    buf[10:h - 10, 10:112, :3] = (0.95, 0.76, 0.04)
+    yy, xx = np.mgrid[0:h, 0:w]
+    tri = (yy >= 24) & (yy <= 100) & (np.abs(xx - 61) <= (yy - 24) * 0.52)
+    tri_in = (yy >= 34) & (yy <= 92) & (np.abs(xx - 61) <= (yy - 34) * 0.44)
+    buf[tri & (~tri_in), :3] = (0.03, 0.03, 0.03)
+    buf[48:74, 57:65, :3] = (0.03, 0.03, 0.03)
+    buf[80:88, 57:65, :3] = (0.03, 0.03, 0.03)
+    # Правая информационная часть
+    _ui_draw_text(buf, 124, 18, "VOLVO CAR CORP", (0.95, 0.96, 0.98), scale=2)
+    buf[40:44, 124:w - 16, :3] = (0.16, 0.52, 0.86)
+    _ui_draw_text(buf, 124, 54, "A/C  R1234YF", (0.96, 0.80, 0.14), scale=2)
+    _ui_draw_text(buf, 124, 80, "OIL  0W-20", (0.86, 0.90, 0.95), scale=2)
+    _ui_draw_text(buf, 124, 104, "CAUTION FAN", (0.92, 0.28, 0.18), scale=2)
+    return _pack_ui_image('Engine_Spec_Tex', buf)
+
+
+def _mat_printed_plate(name, image, metallic=0.65, roughness=0.28, coat=0.35):
+    """Металлическая или виниловая заводская табличка с упакованным изображением."""
+    m = bpy.data.materials.new(name)
+    m.use_nodes = True
+    nt = m.node_tree
+    bsdf = _bsdf_base(m, (0.12, 0.12, 0.13), metallic, roughness, coat=coat, coat_rough=0.10)
+    tc = nt.nodes.new('ShaderNodeTexCoord')
+    tex = nt.nodes.new('ShaderNodeTexImage')
+    tex.image = image
+    tex.extension = 'CLIP'
+    nt.links.new(tc.outputs['UV'], tex.inputs['Vector'])
+    nt.links.new(tex.outputs['Color'], bsdf.inputs['Base Color'])
+    return m
+
+
+def mat_simple_plastic(name, color, roughness=0.32, coat=0.25):
+    m = bpy.data.materials.new(name)
+    m.use_nodes = True
+    _bsdf_base(m, color, 0.0, roughness, coat=coat, coat_rough=0.15)
+    return m
+
+
 def make_materials():
     return {
         'paint': mat_paint(),
@@ -1142,6 +1247,19 @@ def make_materials():
         'wood': mat_wood(),
         'screen_ui': mat_screen_ui(),
         'cluster_ui': mat_cluster_ui(),
+        'engine_badge': _mat_printed_plate(
+            'Engine_Badge_Plate', _build_engine_badge_image(), metallic=0.72, roughness=0.26,
+        ),
+        'engine_spec': _mat_printed_plate(
+            'Engine_Spec_Label', _build_engine_spec_image(),
+            metallic=0.05, roughness=0.24, coat=0.5,
+        ),
+        'washer_blue': mat_simple_plastic('Washer_Cap_Blue', (0.015, 0.18, 0.68), roughness=0.26),
+        'warning_yellow': mat_simple_plastic('Warning_Yellow', (0.86, 0.56, 0.015), roughness=0.28),
+        'coolant_fluid': mat_simple_plastic(
+            'Coolant_Fluid_Pink', (0.78, 0.09, 0.18), roughness=0.16, coat=0.6,
+        ),
+        'trunk_led': mat_emission('Trunk_LED', 6.5, (1.0, 0.95, 0.86)),
         'carpet': mat_leather('Carpet', (0.025, 0.022, 0.020), scale=42.0, roughness=0.85),
         'headliner': mat_leather('Headliner_Fabric', (0.085, 0.080, 0.075),
                                  scale=55.0, roughness=0.90),
@@ -3923,6 +4041,56 @@ def _sweep_rect_tube(bm, points, half_y, half_n):
     bm.faces.new((rings[-1][0], rings[-1][1], rings[-1][2], rings[-1][3]))
 
 
+def _sweep_round_tube(bm, points, radius, seg=12, mat_idx=0):
+    """Замкнутый круглый шланг/трубка вдоль 3D-ломаной (100% manifold, без n-gon)."""
+    rings = []
+    n_pts = len(points)
+    prev_n = None
+    for idx, p in enumerate(points):
+        if idx == 0:
+            tangent = (points[1] - points[0]).normalized()
+        elif idx == n_pts - 1:
+            tangent = (points[-1] - points[-2]).normalized()
+        else:
+            t_prev = (points[idx] - points[idx - 1]).normalized()
+            t_next = (points[idx + 1] - points[idx]).normalized()
+            tangent = t_prev + t_next
+            tangent = tangent.normalized() if tangent.length > 1e-6 else t_next
+        if prev_n is None:
+            ref = Vector((0.0, 0.0, 1.0)) if abs(tangent.z) < 0.85 else Vector((1.0, 0.0, 0.0))
+            n_vec = tangent.cross(ref).normalized()
+        else:
+            n_vec = prev_n - tangent * prev_n.dot(tangent)
+            if n_vec.length < 1e-6:
+                ref = Vector((0.0, 1.0, 0.0)) if abs(tangent.y) < 0.85 else Vector((1.0, 0.0, 0.0))
+                n_vec = tangent.cross(ref).normalized()
+            else:
+                n_vec.normalize()
+        prev_n = n_vec
+        b_vec = tangent.cross(n_vec).normalized()
+        ring = []
+        for k in range(seg):
+            ang = 2.0 * math.pi * k / seg
+            off = (n_vec * math.cos(ang) + b_vec * math.sin(ang)) * radius
+            ring.append(bm.verts.new(p + off))
+        rings.append(ring)
+
+    new_faces = []
+    for i in range(n_pts - 1):
+        r0, r1 = rings[i], rings[i + 1]
+        for k in range(seg):
+            kn = (k + 1) % seg
+            new_faces.append(bm.faces.new((r0[k], r0[kn], r1[kn], r1[k])))
+    c0 = bm.verts.new(points[0])
+    c1 = bm.verts.new(points[-1])
+    for k in range(seg):
+        kn = (k + 1) % seg
+        new_faces.append(bm.faces.new((c0, rings[0][kn], rings[0][k])))
+        new_faces.append(bm.faces.new((c1, rings[-1][k], rings[-1][kn])))
+    for f in new_faces:
+        f.material_index = mat_idx
+
+
 def _add_z_cylinder(bm, radius, z0, z1, seg=18, center_xy=(0.0, 0.0)):
     """Добавляет замкнутый цилиндр вдоль оси Z от z0 до z1."""
     cx, cy = center_xy
@@ -4169,6 +4337,156 @@ def build_trunk(body_ob, mats, collection):
     pl_r.location = Vector((0.0, 0.0, 0.0))
     objs.append(pl_r)
 
+    # 2c. Ворсовая обивка изнанки крышки багажника, пенал аварийного знака и кнопка закрытия
+    # Материалы: 0=carpet, 1=piano_black, 2=caliper (красный знак), 3=trunk_led
+    bm_tl = bmesh.new()
+
+    def _tl_box(x0, x1, y0, y1, z0, z1, m_idx):
+        n0 = len(bm_tl.faces)
+        add_box(bm_tl, x0, x1, y0, y1, z0, z1)
+        bm_tl.faces.ensure_lookup_table()
+        for fi in range(n0, len(bm_tl.faces)):
+            bm_tl.faces[fi].material_index = m_idx
+
+    z_liner = trunk_deck_z(-2.05, 0.0) - TRUNK_LID_THICKNESS - 0.022 - hz
+    # Формованная ворсовая панель на изнанке верхней крышки багажника (между петлями)
+    _tl_box(-0.49, -0.09, -0.315, +0.315, z_liner - 0.010, z_liner, 0)
+    # Рельефная выштамповка-карман и ручка закрывания багажника справа
+    _tl_box(-0.46, -0.38, -0.25, -0.11, z_liner - 0.018, z_liner - 0.009, 1)
+    # Фирменный красный пенал знака аварийной остановки Volvo по центру изнанки крышки
+    _tl_box(-0.34, -0.24, -0.19, +0.19, z_liner - 0.036, z_liner - 0.011, 2)
+    # Два чёрных ремешка-держателя пенала аварийного знака
+    for sy_s in (-0.13, +0.13):
+        _tl_box(-0.345, -0.235, sy_s - 0.012, sy_s + 0.012, z_liner - 0.039, z_liner - 0.009, 1)
+    # Кнопка электропривода закрывания багажника с мягкой белой LED-подсветкой (на нижней кромке)
+    x_btn = rear_tail_surface_x(0.0) + TRUNK_LID_THICKNESS + 0.016 - TRUNK_HINGE_X
+    _tl_box(x_btn - 0.014, x_btn + 0.014, -0.16, -0.09,
+            z_bot_lid + 0.014 - hz, z_bot_lid + 0.034 - hz, 1)
+    _tl_box(x_btn - 0.008, x_btn + 0.008, -0.145, -0.105,
+            z_bot_lid + 0.009 - hz, z_bot_lid + 0.015 - hz, 3)
+
+    tl_ob = bmesh_to_object('Trunk_Lid_Liner', bm_tl, material=mats['carpet'],
+                            smooth=True, collection=collection, bevel=0.0015, bevel_segs=1)
+    tl_ob.data.materials.append(mats['piano_black'])
+    tl_ob.data.materials.append(mats['caliper'])
+    tl_ob.data.materials.append(mats['trunk_led'])
+    uv_box(tl_ob, scale=3.5)
+    tl_ob.parent = trunk_lid
+    tl_ob.location = Vector((0.0, 0.0, 0.0))
+    objs.append(tl_ob)
+
+    # 2d. Оснащение багажного отсека: накладка порога, ручка подполья, проушины, сетки,
+    # лючок длинномеров, кассета-шторка и LED-подсветка (Trunk_Details, родитель Body)
+    # Материалы: 0=chrome, 1=rubber, 2=piano_black, 3=trunk_led, 4=carbon
+    bm_td = bmesh.new()
+
+    def _td_box(x0, x1, y0, y1, z0, z1, m_idx):
+        n0 = len(bm_td.faces)
+        add_box(bm_td, x0, x1, y0, y1, z0, z1)
+        bm_td.faces.ensure_lookup_table()
+        for fi in range(n0, len(bm_td.faces)):
+            bm_td.faces[fi].material_index = m_idx
+
+    # Металлическая защитная накладка погрузочного порога + 5 резиновых полос
+    _td_box(-2.266, -2.238, -0.445, +0.445, 0.643, 0.654, 0)
+    for k_st in range(5):
+        ys = -0.34 + k_st * 0.17
+        if abs(ys) < 0.05:
+            continue
+        _td_box(-2.264, -2.240, ys - 0.048, ys + 0.048, 0.6545, 0.659, 1)
+    # Центральная ответная скоба замка багажника в утопленной чёрной чашке
+    _td_box(-2.264, -2.238, -0.052, +0.052, 0.653, 0.660, 2)
+    _td_box(-2.256, -2.246, -0.024, +0.024, 0.661, 0.674, 0)
+
+    # Контур люка подполья (докатки) и утопленная хромированная ручка подъёма пола
+    _td_box(-2.14, -2.125, -0.34, +0.34, 0.5065, 0.5095, 1)
+    _td_box(-1.52, -1.505, -0.34, +0.34, 0.5065, 0.5095, 1)
+    _td_box(-2.123, -1.522, -0.355, -0.341, 0.5065, 0.5095, 1)
+    _td_box(-2.123, -1.522, +0.341, +0.355, 0.5065, 0.5095, 1)
+    _td_box(-2.12, -2.055, -0.068, +0.068, 0.5065, 0.514, 2)
+    _td_box(-2.104, -2.088, -0.046, +0.046, 0.5145, 0.522, 0)
+
+    # 4 хромированные такелажные проушины (петли крепления груза) по углам пола
+    for tx in (-2.15, -1.36):
+        for ty in (-0.405, +0.405):
+            _td_box(tx - 0.022, tx + 0.022, ty - 0.018, ty + 0.018, 0.5065, 0.513, 2)
+            _td_box(tx - 0.016, tx + 0.016, ty - 0.012, ty + 0.012, 0.5135, 0.525, 0)
+
+    # Задняя натянутая эластичная багажная сетка-органайзер (поперёк багажника на x=-2.04)
+    for k_hz in range(4):
+        zz_n = 0.528 + k_hz * 0.044
+        _sweep_round_tube(
+            bm_td,
+            [Vector((-2.04, -0.405, zz_n)), Vector((-2.04, 0.0, zz_n)),
+             Vector((-2.04, +0.405, zz_n))],
+            radius=0.0032 if k_hz in (0, 3) else 0.0020, seg=8, mat_idx=1,
+        )
+    for k_vy in range(7):
+        yy_n = -0.39 + k_vy * 0.13
+        _sweep_round_tube(
+            bm_td,
+            [Vector((-2.04, yy_n, 0.525)), Vector((-2.04, yy_n, 0.662))],
+            radius=0.0020, seg=8, mat_idx=1,
+        )
+    # Боковые карманные сетки-органайзеры вдоль левой и правой стенок (ниже хода лифтов)
+    for side in (1.0, -1.0):
+        yn_s = side * 0.448
+        for zz_s in (0.526, 0.578, 0.628):
+            _sweep_round_tube(
+                bm_td,
+                [Vector((-1.98, yn_s, zz_s)), Vector((-1.62, yn_s, zz_s))],
+                radius=0.0028 if zz_s > 0.60 else 0.0018, seg=8, mat_idx=1,
+            )
+        for xx_s in (-1.96, -1.85, -1.74, -1.63):
+            _sweep_round_tube(
+                bm_td,
+                [Vector((xx_s, yn_s, 0.524)), Vector((xx_s, yn_s, 0.630))],
+                radius=0.0018, seg=8, mat_idx=1,
+            )
+        # Кронштейны боковой сетки
+        for xx_c in (-1.985, -1.615):
+            ya, yb = (side * 0.446, side * 0.472)
+            y0, y1 = (ya, yb) if ya < yb else (yb, ya)
+            _td_box(xx_c - 0.009, xx_c + 0.009, y0, y1, 0.622, 0.642, 2)
+
+    # Справа на стенке багажника: розетка 12V и откидной крючок для пакетов
+    _td_box(-1.54, -1.48, -0.472, -0.456, 0.665, 0.720, 2)
+    _td_box(-1.525, -1.495, -0.454, -0.445, 0.680, 0.705, 0)
+    _td_box(-1.74, -1.70, -0.472, -0.444, 0.720, 0.742, 2)
+    _td_box(-1.73, -1.71, -0.442, -0.434, 0.704, 0.730, 2)
+
+    # Передняя стенка за спинкой заднего сиденья: лыжный лючок + кассета-шторка с рейкой
+    # Рамка лыжного лючка для длинномеров по центру спинки
+    _td_box(-1.252, -1.241, -0.125, +0.125, 0.545, 0.770, 2)
+    _td_box(-1.258, -1.253, -0.105, +0.105, 0.562, 0.752, 4)
+    _td_box(-1.264, -1.259, -0.032, +0.032, 0.718, 0.742, 0)  # хромированная клавиша лючка
+    # Верхняя кассета выдвижной полки-шторки с хромированной рукояткой-рейкой
+    _td_box(-1.315, -1.242, -0.460, +0.460, 0.795, 0.852, 4)
+    _td_box(-1.345, -1.316, -0.445, +0.445, 0.816, 0.832, 0)  # хромированная направляющая шторки
+
+    # Светодиодная подсветка багажного отсека: 2 боковых LED-плафона + 1 верхний центральный
+    for side in (1.0, -1.0):
+        ya, yb = (side * 0.460, side * 0.473)
+        y0, y1 = (ya, yb) if ya < yb else (yb, ya)
+        _td_box(-1.60, -1.49, y0, y1, 0.740, 0.768, 2)
+        ya_l, yb_l = (side * 0.454, side * 0.461)
+        yl0, yl1 = (ya_l, yb_l) if ya_l < yb_l else (yb_l, ya_l)
+        _td_box(-1.588, -1.502, yl0, yl1, 0.746, 0.762, 3)
+    # Верхний центральный LED-плафон под полкой багажника
+    _td_box(-1.38, -1.31, -0.075, +0.075, 0.838, 0.852, 2)
+    _td_box(-1.372, -1.318, -0.062, +0.062, 0.832, 0.839, 3)
+
+    td_ob = bmesh_to_object('Trunk_Details', bm_td, material=mats['chrome'],
+                            smooth=True, collection=collection, bevel=0.0)
+    td_ob.data.materials.append(mats['rubber'])
+    td_ob.data.materials.append(mats['piano_black'])
+    td_ob.data.materials.append(mats['trunk_led'])
+    td_ob.data.materials.append(mats['carbon'])
+    uv_box(td_ob, scale=4.0)
+    td_ob.parent = body_ob
+    td_ob.matrix_parent_inverse = body_ob.matrix_world.inverted()
+    objs.append(td_ob)
+
     # 3. Петли багажника («гусиная шея») и телескопические газовые лифты (слева и справа)
     bx, bz = TRUNK_LIFT_BODY_XZ
     lx, lz = trunk_lift_lid_local_xz()
@@ -4287,68 +4605,222 @@ def build_hood(body_ob, mats, collection):
     z_sub = 0.275
     # Поперечный 4-цилиндровый блок ДВС (расположен правее оси Y, КПП — слева, как у Volvo S90)
     add_box(bm_eng, 1.42, 1.84, -0.34, 0.08, z_sub, 0.635)
-    # Декоративная пластиковая плита Volvo Drive-E с 4 продольными рёбрами жёсткости
-    add_box(bm_eng, 1.44, 1.81, -0.32, 0.06, 0.642, 0.695)
+    # Скульптурная декоративная плита Volvo Drive-E с боковыми и продольными рёбрами
+    add_box(bm_eng, 1.44, 1.81, -0.32, 0.06, 0.642, 0.700)
     for k_rib in range(4):
-        ry = -0.26 + k_rib * 0.095
-        add_box(bm_eng, 1.46, 1.79, ry - 0.022, ry + 0.022, 0.698, 0.715)
-    # Маслозаливная горловина на передней части крышки двигателя
-    _add_z_cylinder(bm_eng, 0.028, 0.696, 0.732, seg=14, center_xy=(1.74, -0.24))
+        ry = -0.27 + k_rib * 0.095
+        add_box(bm_eng, 1.455, 1.795, ry - 0.018, ry + 0.018, 0.702, 0.714)
+    # Маслозаливная горловина на передней правой части крышки двигателя
+    _add_z_cylinder(bm_eng, 0.028, 0.700, 0.734, seg=16, center_xy=(1.75, -0.25))
 
     # Основной радиатор + кожух электровентилятора сразу за «телевизором»
     add_box(bm_eng, 2.02, 2.11, -0.45, 0.45, 0.295, 0.715)
-    # Верхний и нижний резиновые патрубки ОЖ (радиатор <-> двигатель)
-    add_box(bm_eng, 1.82, 2.018, -0.30, -0.24, 0.61, 0.655)
-    add_box(bm_eng, 1.82, 2.018, 0.00, 0.05, 0.34, 0.385)
+    # Верхний и нижний гнутые резиновые патрубки ОЖ (радиатор <-> термостат/помпа ДВС)
+    _sweep_round_tube(bm_eng, [
+        Vector((1.82, -0.25, 0.625)),
+        Vector((1.89, -0.28, 0.645)),
+        Vector((1.96, -0.30, 0.655)),
+        Vector((2.03, -0.30, 0.640)),
+    ], radius=0.022, seg=12)
+    _sweep_round_tube(bm_eng, [
+        Vector((1.82, 0.02, 0.365)),
+        Vector((1.90, 0.05, 0.355)),
+        Vector((2.03, 0.05, 0.365)),
+    ], radius=0.020, seg=12)
+    # Тонкий возвратный шланг ОЖ от верхней банки радиатора к расширительному бачку
+    # (аккуратно огибает синюю крышку бачка омывателя на (1.90, -0.41))
+    _sweep_round_tube(bm_eng, [
+        Vector((2.03, -0.34, 0.695)),
+        Vector((1.88, -0.34, 0.695)),
+        Vector((1.66, -0.37, 0.690)),
+        Vector((1.46, -0.39, 0.665)),
+    ], radius=0.007, seg=10)
 
-    # Корпус воздушного фильтра (Airbox, слева +Y) + холодный впуск к «телевизору» и гофра к ДВС
+    # Корпус воздушного фильтра (Airbox, слева +Y) + рёбра жёсткости + холодный впуск
     add_box(bm_eng, 1.66, 1.98, 0.25, 0.45, 0.44, 0.675)
+    for rx_a in (1.72, 1.80, 1.88, 1.94):
+        add_box(bm_eng, rx_a - 0.008, rx_a + 0.008, 0.265, 0.435, 0.677, 0.686)
     add_box(bm_eng, 1.982, 2.13, 0.30, 0.42, 0.60, 0.665)  # заборник холодного воздуха
-    add_box(bm_eng, 1.56, 1.66, 0.09, 0.32, 0.59, 0.655)   # гофра впуска от фильтра к ДВС
+    # Изогнутый гофрированный патрубок впуска от корпуса фильтра к турбине/ДВС
+    _sweep_round_tube(bm_eng, [
+        Vector((1.66, 0.32, 0.625)),
+        Vector((1.58, 0.27, 0.635)),
+        Vector((1.53, 0.17, 0.630)),
+        Vector((1.53, 0.07, 0.615)),
+    ], radius=0.032, seg=14)
+    # Гофрированные кольца-усилители на впускном патрубке
+    for cy_g in (0.12, 0.16, 0.20, 0.24):
+        _add_y_cylinder(bm_eng, 0.037, cy_g - 0.006, cy_g + 0.006, seg=14, center_xz=(1.54, 0.630))
 
-    # Короб АКБ и блок предохранителей у моторного щита (слева +Y)
+    # Короб АКБ 12V и блок реле/предохранителей у моторного щита (слева +Y)
     add_box(bm_eng, 1.18, 1.42, 0.27, 0.47, 0.39, 0.665)
-    add_box(bm_eng, 1.44, 1.62, 0.32, 0.47, 0.44, 0.635)   # блок реле и предохранителей
+    add_box(bm_eng, 1.44, 1.62, 0.32, 0.47, 0.44, 0.642)   # блок реле и предохранителей
+    add_box(bm_eng, 1.455, 1.605, 0.335, 0.455, 0.644, 0.654)  # крышка блока предохранителей
+    # Кабельный жгут вдоль моторного щита к блоку предохранителей и катушкам
+    _sweep_round_tube(bm_eng, [
+        Vector((1.18, -0.44, 0.705)),
+        Vector((1.18, -0.10, 0.705)),
+        Vector((1.18, +0.24, 0.705)),
+        Vector((1.44, +0.34, 0.650)),
+    ], radius=0.011, seg=10)
 
     # Бачок омывателя стекла у правого брызговика (-Y) с заливной горловиной
     add_box(bm_eng, 1.78, 1.98, -0.47, -0.35, 0.36, 0.635)
-    _add_z_cylinder(bm_eng, 0.022, 0.636, 0.685, seg=12, center_xy=(1.90, -0.41))
+    _add_z_cylinder(bm_eng, 0.022, 0.636, 0.688, seg=14, center_xy=(1.90, -0.41))
 
     engine_bay = bmesh_to_object('Engine_Bay', bm_eng, material=mats['carbon'],
                                  smooth=True, collection=collection, bevel=0.003)
     uv_box(engine_bay, scale=2.5)
     _attach_body(engine_bay)
 
-    # 1b. Металлические узлы моторного отсека (Engine_Metal — алюминий: КПП, коллектор, опоры)
+    # 1b. Металлические узлы моторного отсека (Engine_Metal — алюминий: КПП, коллектор,
+    # трубки кондиционера, топливная рампа, хомуты, распорка чашек)
     bm_em = bmesh.new()
     # Корпус поперечной 8-ступенчатой КПП (слева от блока ДВС)
     add_box(bm_em, 1.46, 1.78, 0.085, 0.295, 0.31, 0.575)
-    # Алюминиевый впускной ресивер и 4 патрубка перед блоком цилиндров
+    # Алюминиевый впускной ресивер и 4 патрубка + топливная рампа перед блоком цилиндров
     add_box(bm_em, 1.845, 1.94, -0.28, 0.04, 0.54, 0.63)
     for k_run in range(4):
         ry = -0.24 + k_run * 0.082
         add_box(bm_em, 1.81, 1.843, ry - 0.018, ry + 0.018, 0.57, 0.625)
+    _add_y_cylinder(bm_em, 0.011, -0.27, +0.03, seg=12, center_xz=(1.835, 0.648))
     # Теплозащитный экран турбины/выпуска у моторного щита
     add_box(bm_em, 1.24, 1.39, -0.28, 0.04, 0.44, 0.635)
-    # Верхние опорные фланцы передних амортизационных стоек (с центральной гайкой)
+    # Верхние опорные фланцы передних амортизационных стоек (с центральной гайкой и 3 болтами)
     for side in (1.0, -1.0):
         _add_z_cylinder(bm_em, 0.072, 0.792, 0.816, seg=18, center_xy=(AXLE_F, side * 0.54))
         _add_z_cylinder(bm_em, 0.018, 0.817, 0.834, seg=12, center_xy=(AXLE_F, side * 0.54))
+        for kb in range(3):
+            ba = kb * 2.0 * math.pi / 3.0
+            _add_z_cylinder(
+                bm_em, 0.008, 0.817, 0.826, seg=8,
+                center_xy=(AXLE_F + 0.048 * math.cos(ba), side * 0.54 + 0.048 * math.sin(ba)),
+            )
     # Алюминиевая поперечная распорка чашек стоек (перед жабо)
     add_box(bm_em, 1.28, 1.32, -0.50, 0.50, 0.745, 0.772)
+    # Две алюминиевые магистрали кондиционера A/C вдоль правого брызговика (-Y)
+    for dy_ac, r_ac in ((-0.465, 0.0085), (-0.445, 0.0065)):
+        _sweep_round_tube(bm_em, [
+            Vector((1.20, dy_ac, 0.675)),
+            Vector((1.52, dy_ac, 0.695)),
+            Vector((1.78, dy_ac, 0.690)),
+            Vector((2.04, dy_ac + 0.03, 0.665)),
+        ], radius=r_ac, seg=10)
+    # Обжимные металлические хомуты на патрубках ОЖ и впуска
+    _add_x_cylinder(bm_em, 0.025, 1.845, 1.860, seg=14, center_yz=(-0.265, 0.635))
+    _add_x_cylinder(bm_em, 0.025, 1.995, 2.010, seg=14, center_yz=(-0.300, 0.648))
+    _add_y_cylinder(bm_em, 0.036, 0.275, 0.290, seg=14, center_xz=(1.59, 0.633))
     em_ob = bmesh_to_object('Engine_Metal', bm_em, material=mats['alloy'],
-                            smooth=True, collection=collection, bevel=0.0025)
+                            smooth=True, collection=collection, bevel=0.002)
     uv_box(em_ob, scale=3.5)
     _attach_body(em_ob)
 
-    # 1c. Полупрозрачный/светлый расширительный бачок ОЖ (Coolant_Tank — правый брызговик)
+    # 1c. Двухцветный расширительный бачок ОЖ (Coolant_Tank: молочный верх + розовый антифриз
+    # G12 внутри + чёрная крышка давления)
     bm_ct = bmesh.new()
-    add_box(bm_ct, 1.26, 1.46, -0.47, -0.33, 0.55, 0.675)
-    _add_z_cylinder(bm_ct, 0.026, 0.676, 0.708, seg=14, center_xy=(1.36, -0.40))
+    # Нижняя часть с видимым уровнем розового антифриза (slot 1 = coolant_fluid)
+    add_box(bm_ct, 1.26, 1.46, -0.47, -0.33, 0.55, 0.622)
+    bm_ct.faces.ensure_lookup_table()
+    for f_c in bm_ct.faces:
+        f_c.material_index = 1
+    # Верхняя молочно-белая колба бачка (slot 0 = white)
+    n_ct_w = len(bm_ct.faces)
+    add_box(bm_ct, 1.26, 1.46, -0.47, -0.33, 0.623, 0.678)
+    bm_ct.faces.ensure_lookup_table()
+    for fi in range(n_ct_w, len(bm_ct.faces)):
+        bm_ct.faces[fi].material_index = 0
+    # Чёрная ребристая крышка давления бачка ОЖ (slot 2 = rubber)
+    n_ct_cap = len(bm_ct.faces)
+    _add_z_cylinder(bm_ct, 0.029, 0.679, 0.712, seg=16, center_xy=(1.36, -0.40))
+    bm_ct.faces.ensure_lookup_table()
+    for fi in range(n_ct_cap, len(bm_ct.faces)):
+        bm_ct.faces[fi].material_index = 2
     ct_ob = bmesh_to_object('Coolant_Tank', bm_ct, material=mats['white'],
-                            smooth=True, collection=collection, bevel=0.003)
+                            smooth=True, collection=collection, bevel=0.0025)
+    ct_ob.data.materials.append(mats['coolant_fluid'])
+    ct_ob.data.materials.append(mats['rubber'])
     uv_box(ct_ob, scale=6.0)
     _attach_body(ct_ob)
+
+    # 1d. Детализация моторного отсека Volvo Drive-E T6 AWD (Engine_Details, родитель Body):
+    # - Упакованная металлическая табличка крышки ДВС VOLVO / DRIVE-E T6 AWD (slot 0)
+    # - Заводская сервисная табличка на телевизоре R1234YF / 0W-20 / CAUTION FAN (slot 1)
+    # - Клеммы АКБ (+ красная с силовым кабелем, - хром), синяя крышка омывателя,
+    #   жёлтый масляный щуп, сервисные колпачки A/C, окантовка горловины масла
+    # Материалы: 0=engine_badge, 1=engine_spec, 2=chrome, 3=caliper, 4=washer_blue,
+    #            5=warning_yellow, 6=piano_black
+    bm_ed = bmesh.new()
+
+    def _ed_box(x0, x1, y0, y1, z0, z1, m_idx):
+        n0 = len(bm_ed.faces)
+        add_box(bm_ed, x0, x1, y0, y1, z0, z1)
+        bm_ed.faces.ensure_lookup_table()
+        for fi in range(n0, len(bm_ed.faces)):
+            bm_ed.faces[fi].material_index = m_idx
+
+    def _ed_zcyl(r, z0, z1, xy, m_idx, seg=14):
+        n0 = len(bm_ed.faces)
+        _add_z_cylinder(bm_ed, r, z0, z1, seg=seg, center_xy=xy)
+        bm_ed.faces.ensure_lookup_table()
+        for fi in range(n0, len(bm_ed.faces)):
+            bm_ed.faces[fi].material_index = m_idx
+
+    # Табличка крышки двигателя VOLVO DRIVE-E T6 AWD + тонкая хромированная подложка-рамка
+    # (читаема спереди: x_back=1.525..x_front=1.705, y_right=-0.275..y_left=+0.025)
+    _ed_box(1.518, 1.712, -0.282, +0.032, 0.7145, 0.7185, 2)
+    _ed_box(1.525, 1.705, -0.275, +0.025, 0.7186, 0.7220, 0)
+
+    # Заводская сервисная табличка на верхней балке «телевизора» (справа от замка капота)
+    # (x_back=2.142..x_front=2.226, y_right=-0.400..y_left=-0.148)
+    _ed_box(2.142, 2.226, -0.400, -0.148, 0.7465, 0.7505, 1)
+
+    # Хромированный ободок маслозаливной пробки
+    _ed_zcyl(0.030, 0.7345, 0.741, (1.75, -0.25), 2, seg=16)
+    _ed_zcyl(0.023, 0.7412, 0.745, (1.75, -0.25), 6, seg=14)
+
+    # Синяя фирменная крышка бачка омывателя с откидным язычком (у правого брызговика)
+    _ed_zcyl(0.026, 0.6885, 0.704, (1.90, -0.41), 4, seg=16)
+    _ed_box(1.888, 1.912, -0.452, -0.432, 0.695, 0.703, 4)
+
+    # Ярко-жёлтая петля-ручка масляного щупа перед блоком цилиндров
+    _ed_zcyl(0.0045, 0.615, 0.688, (1.835, -0.04), 6, seg=10)
+    _ed_box(1.825, 1.845, -0.062, -0.018, 0.689, 0.718, 5)
+    _ed_box(1.828, 1.842, -0.050, -0.030, 0.696, 0.710, 6)
+
+    # АКБ 12V слева у моторного щита: 6 пробок, красная плюсовая клемма +, силовой кабель,
+    # хромированная минусовая клемма - и жёлтая сервисная наклейка
+    for k_cell in range(6):
+        cy_b = 0.295 + k_cell * 0.030
+        _ed_zcyl(0.0085, 0.666, 0.673, (1.30, cy_b), 6, seg=10)
+    # Красная защитная крышка плюсовой клеммы (+) + красный силовой кабель к предохранителям
+    _ed_box(1.345, 1.405, 0.305, 0.355, 0.666, 0.698, 3)
+    _sweep_round_tube(bm_ed, [
+        Vector((1.400, 0.330, 0.682)),
+        Vector((1.445, 0.345, 0.680)),
+        Vector((1.485, 0.375, 0.656)),
+    ], radius=0.008, seg=10, mat_idx=3)
+    # Минусовая клемма (-) из хрома + чёрный провод массы на брызговик
+    _ed_zcyl(0.012, 0.666, 0.692, (1.23, 0.43), 2, seg=12)
+    _ed_box(1.215, 1.245, 0.415, 0.448, 0.674, 0.688, 2)
+    # Жёлтая наклейка предупреждения на крышке АКБ
+    _ed_box(1.21, 1.27, 0.295, 0.375, 0.666, 0.670, 5)
+
+    # Сервисные колпачки заправки кондиционера (L = синий, H = красный) на трубках A/C
+    _ed_zcyl(0.009, 0.696, 0.716, (1.64, -0.465), 4, seg=12)
+    _ed_zcyl(0.009, 0.692, 0.712, (1.72, -0.445), 3, seg=12)
+
+    ed_ob = bmesh_to_object('Engine_Details', bm_ed, material=mats['engine_badge'],
+                            smooth=True, collection=collection, bevel=0.0008, bevel_segs=1)
+    ed_ob.data.materials.append(mats['engine_spec'])
+    ed_ob.data.materials.append(mats['chrome'])
+    ed_ob.data.materials.append(mats['caliper'])
+    ed_ob.data.materials.append(mats['washer_blue'])
+    ed_ob.data.materials.append(mats['warning_yellow'])
+    ed_ob.data.materials.append(mats['piano_black'])
+    uv_box(ed_ob, scale=4.0)
+    uv_face_z_plus(ed_ob, 0, x_back=1.525, x_front=1.705, y_right=-0.275, y_left=+0.025)
+    uv_face_z_plus(ed_ob, 1, x_back=2.142, x_front=2.226, y_right=-0.400, y_left=-0.148)
+    _attach_body(ed_ob)
 
     # 2. Отделённая крышка капота (origin в оси задней петли, вращается вокруг -Y)
     # Плавная обтекаемая передняя кромка по дуге front_nose_surface_x(y) с чётким 7-мм зазором
@@ -4437,6 +4909,43 @@ def build_hood(body_ob, mats, collection):
     uv_box(hood_lid, scale=1.0)
     hood_lid.location = hinge_origin
     _attach_body(hood_lid)
+
+    # 2b. Формованная термошумоизоляция изнанки капота с 6 крепёжными клипсами (Hood_Insulation)
+    bm_hi = bmesh.new()
+    hi_top, hi_bot = [], []
+    for ix in range(7):
+        ux = ix / 6.0
+        xw = 1.22 + (2.06 - 1.22) * ux
+        hw_i = 0.42 - 0.06 * ux
+        rt, rb = [], []
+        for jy in range(7):
+            vy = -1.0 + 2.0 * jy / 6.0
+            yw = vy * hw_i
+            z_in = hood_deck_z(xw, yw) - HOOD_LID_THICKNESS - 0.020 - hz
+            # Рельефная выштамповка по центру мата
+            emboss = 0.004 * (1.0 - vy * vy) * math.sin(math.pi * ux)
+            rt.append(Vector((xw - HOOD_HINGE_X, yw, z_in)))
+            rb.append(Vector((xw - HOOD_HINGE_X, yw, z_in - 0.010 - emboss)))
+        hi_top.append(rt)
+        hi_bot.append(rb)
+    _add_thick_grid(bm_hi, hi_top, hi_bot)
+    # 6 круглых пластиковых пистонов крепления шумоизоляции (slot 1 = piano_black)
+    n_hi_clips = len(bm_hi.faces)
+    for cx_p in (1.30, 1.64, 1.98):
+        for cy_p in (-0.30, +0.30):
+            zp = hood_deck_z(cx_p, cy_p) - HOOD_LID_THICKNESS - 0.032 - hz
+            _add_z_cylinder(bm_hi, 0.013, zp - 0.005, zp + 0.004, seg=12,
+                            center_xy=(cx_p - HOOD_HINGE_X, cy_p))
+    bm_hi.faces.ensure_lookup_table()
+    for fi in range(n_hi_clips, len(bm_hi.faces)):
+        bm_hi.faces[fi].material_index = 1
+    hi_ob = bmesh_to_object('Hood_Insulation', bm_hi, material=mats['carpet'],
+                            smooth=True, collection=collection, bevel=0.0015, bevel_segs=1)
+    hi_ob.data.materials.append(mats['piano_black'])
+    uv_box(hi_ob, scale=3.0)
+    hi_ob.parent = hood_lid
+    hi_ob.location = Vector((0.0, 0.0, 0.0))
+    objs.append(hi_ob)
 
     # 3. Петли капота и телескопические газовые упоры (слева и справа)
     bx, bz = HOOD_LIFT_BODY_XZ

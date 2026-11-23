@@ -71,7 +71,8 @@ def test_collections_and_bounding_box(built_scene_dir):
         'Seatbelts',
         'PDC_Sensors_Front', 'Headlight_Washers', 'PDC_Sensors_Rear', 'Trunk_Badge',
         'Mirror_L', 'Mirror_R',
-        'Hood_Lid', 'Engine_Bay', 'Engine_Metal', 'Coolant_Tank',
+        'Hood_Lid', 'Hood_Insulation', 'Engine_Bay', 'Engine_Metal',
+        'Coolant_Tank', 'Engine_Details',
         'Fender_Front_L', 'Fender_Front_R', 'Front_Bumper',
         'Front_Subframe', 'Crash_Beam', 'Fender_Apron_L', 'Fender_Apron_R',
         'Radiator_Support', 'Cowl_Panel',
@@ -83,7 +84,7 @@ def test_collections_and_bounding_box(built_scene_dir):
         'Hood_Lift_Bracket_L', 'Hood_Lift_Bracket_R',
         'Hood_Lift_Cyl_L', 'Hood_Lift_Cyl_R',
         'Hood_Lift_Rod_L', 'Hood_Lift_Rod_R',
-        'Trunk_Lid', 'Trunk_Floor',
+        'Trunk_Lid', 'Trunk_Lid_Liner', 'Trunk_Floor', 'Trunk_Details',
         'Trunk_Hinge_Mount_L', 'Trunk_Hinge_Mount_R',
         'Trunk_Hinge_Arm_L', 'Trunk_Hinge_Arm_R',
         'Trunk_Lift_Mount_L', 'Trunk_Lift_Mount_R',
@@ -136,8 +137,12 @@ def test_collections_and_bounding_box(built_scene_dir):
                      'Rear_Reflector_L', 'Rear_Reflector_R', 'PDC_Sensors_Rear'):
         assert bpy.data.objects[rb_child].parent.name == 'Rear_Bumper'
     assert bpy.data.objects['Trunk_Badge'].parent.name == 'Trunk_Lid'
-    # Упакованные OLED-текстуры приборной панели 12.3" и планшета Sensus 9" в .blend
-    for img_name in ('Cluster_UI_Tex', 'Sensus_UI_Tex'):
+    assert bpy.data.objects['Trunk_Lid_Liner'].parent.name == 'Trunk_Lid'
+    assert bpy.data.objects['Trunk_Details'].parent.name == 'Body'
+    assert bpy.data.objects['Hood_Insulation'].parent.name == 'Hood_Lid'
+    assert bpy.data.objects['Engine_Details'].parent.name == 'Body'
+    # Упакованные OLED-текстуры и подкапотные заводские таблички в .blend
+    for img_name in ('Cluster_UI_Tex', 'Sensus_UI_Tex', 'Engine_Badge_Tex', 'Engine_Spec_Tex'):
         img = bpy.data.images.get(img_name)
         assert img is not None and img.packed_file is not None, f'Не упакована текстура {img_name}'
     # Дверные ручки полностью отделены от дверей и имеют собственный origin в шарнире ручки
