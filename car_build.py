@@ -27,6 +27,7 @@ import sys
 
 import bpy
 import bmesh
+import numpy as np
 from mathutils import Vector
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -323,6 +324,23 @@ def uv_box(ob, scale=1.0):
                 uv[loop_idx].uv = (co.x * scale, co.z * scale)
             else:
                 uv[loop_idx].uv = (co.y * scale, co.z * scale)
+
+
+def uv_face_x_minus(ob, mat_idx, y_left, y_right, z_bot, z_top):
+    """Точный 1:1 UV-маппинг лицевой (-X) грани дисплея в [0..1]×[0..1]
+    (слева направо при взгляде водителя вперёд по +X — от y_left (+Y) к y_right (-Y))."""
+    me = ob.data
+    layer = me.uv_layers[0] if me.uv_layers else me.uv_layers.new(name='UVMap')
+    uv = layer.data
+    dy = y_left - y_right
+    dz = z_top - z_bot
+    for poly in me.polygons:
+        if poly.material_index == mat_idx and poly.normal.x < -0.5:
+            for loop_idx in poly.loop_indices:
+                co = me.vertices[me.loops[loop_idx].vertex_index].co
+                u = clamp((y_left - co.y) / dy, 0.0, 1.0)
+                v = clamp((co.z - z_bot) / dz, 0.0, 1.0)
+                uv[loop_idx].uv = (u, v)
 
 
 def look_at(obj, target):
@@ -627,6 +645,56 @@ def mat_leather(name, color, scale=9.0, roughness=0.65):
     return m
 
 
+def mat_leather_perforated(name, color, roughness=0.52):
+    """Вентилируемая перфорированная кожа Nappa (Volvo S90 Inscription):
+    зерно кожи + регулярная микро-перфорация Voronoi по Object-координатам."""
+    m = bpy.data.materials.new(name)
+    m.use_nodes = True
+    nt = m.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new('ShaderNodeOutputMaterial')
+    bsdf = nt.nodes.new('ShaderNodeBsdfPrincipled')
+    bsdf.inputs['Roughness'].default_value = roughness
+
+    tc = nt.nodes.new('ShaderNodeTexCoord')
+    # Регулярная сетка микро-отверстий вентиляции (Randomness = 0.0)
+    vor = nt.nodes.new('ShaderNodeTexVoronoi')
+    vor.inputs['Scale'].default_value = 145.0
+    vor.inputs['Randomness'].default_value = 0.0
+    hole = nt.nodes.new('ShaderNodeMapRange')
+    hole.inputs['From Min'].default_value = 0.14
+    hole.inputs['From Max'].default_value = 0.28
+    hole.inputs['To Min'].default_value = 0.0
+    hole.inputs['To Max'].default_value = 1.0
+
+    # Мелкое зерно кожи поверх перфорации
+    noise = nt.nodes.new('ShaderNodeTexNoise')
+    noise.inputs['Scale'].default_value = 55.0
+    noise.inputs['Detail'].default_value = 5.0
+
+    _, fac_in, a_in, b_in, col_out = _new_mix_rgba(nt, blend_type='MIX', fac=0.5)
+    a_in.default_value = (color[0] * 0.38, color[1] * 0.36, color[2] * 0.35, 1.0)
+    b_in.default_value = (color[0], color[1], color[2], 1.0)
+
+    math_comb = nt.nodes.new('ShaderNodeMath')
+    math_comb.operation = 'MULTIPLY'
+    bump = nt.nodes.new('ShaderNodeBump')
+    bump.inputs['Strength'].default_value = 0.14
+    bump.inputs['Distance'].default_value = 0.0014
+
+    nt.links.new(tc.outputs['Object'], vor.inputs['Vector'])
+    nt.links.new(tc.outputs['Object'], noise.inputs['Vector'])
+    nt.links.new(vor.outputs['Distance'], hole.inputs['Value'])
+    nt.links.new(hole.outputs['Result'], fac_in)
+    nt.links.new(col_out, bsdf.inputs['Base Color'])
+    nt.links.new(hole.outputs['Result'], math_comb.inputs[0])
+    nt.links.new(noise.outputs['Fac'], math_comb.inputs[1])
+    nt.links.new(math_comb.outputs['Value'], bump.inputs['Height'])
+    nt.links.new(bump.outputs['Normal'], bsdf.inputs['Normal'])
+    nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
+    return m
+
+
 def mat_emission(name, strength, color=(1.0, 1.0, 1.0)):
     m = bpy.data.materials.new(name)
     m.use_nodes = True
@@ -781,27 +849,283 @@ def mat_wood():
     return m
 
 
-def mat_screen_ui():
-    """OLED-дисплей Volvo Sensus / Digital Cluster: плавный тёмно-сапфировый UI-градиент."""
-    m = bpy.data.materials.new('Screen_Sensus_UI')
+# Встроенный компактный 5x7 пиксельный шрифт для чётких OLED-цифр/надписей приборки и Sensus
+_FONT_5X7 = {
+    '0': ("01110", "10001", "10011", "10101", "11001", "10001", "01110"),
+    '1': ("00100", "01100", "00100", "00100", "00100", "00100", "01110"),
+    '2': ("01110", "10001", "00001", "00110", "01000", "10000", "11111"),
+    '3': ("11110", "00001", "00001", "01110", "00001", "00001", "11110"),
+    '4': ("00010", "00110", "01010", "10010", "11111", "00010", "00010"),
+    '5': ("11111", "10000", "11110", "00001", "00001", "10001", "01110"),
+    '6': ("01110", "10000", "11110", "10001", "10001", "10001", "01110"),
+    '7': ("11111", "00001", "00010", "00100", "01000", "01000", "01000"),
+    '8': ("01110", "10001", "10001", "01110", "10001", "10001", "01110"),
+    '9': ("01110", "10001", "10001", "01111", "00001", "00010", "01100"),
+    ':': ("00000", "00100", "00100", "00000", "00100", "00100", "00000"),
+    '.': ("00000", "00000", "00000", "00000", "00000", "01100", "01100"),
+    '/': ("00001", "00010", "00100", "00100", "01000", "10000", "00000"),
+    '°': ("01100", "10010", "01100", "00000", "00000", "00000", "00000"),
+    ' ': ("00000", "00000", "00000", "00000", "00000", "00000", "00000"),
+    'B': ("11110", "10001", "10001", "11110", "10001", "10001", "11110"),
+    'C': ("01110", "10001", "10000", "10000", "10000", "10001", "01110"),
+    'D': ("11110", "10001", "10001", "10001", "10001", "10001", "11110"),
+    'F': ("11111", "10000", "10000", "11110", "10000", "10000", "10000"),
+    'H': ("10001", "10001", "10001", "11111", "10001", "10001", "10001"),
+    'K': ("10001", "10010", "10100", "11000", "10100", "10010", "10001"),
+    'L': ("10000", "10000", "10000", "10000", "10000", "10000", "11111"),
+    'M': ("10001", "11011", "10101", "10001", "10001", "10001", "10001"),
+    'N': ("10001", "11001", "10101", "10011", "10001", "10001", "10001"),
+    'O': ("01110", "10001", "10001", "10001", "10001", "10001", "01110"),
+    'P': ("11110", "10001", "10001", "11110", "10000", "10000", "10000"),
+    'R': ("11110", "10001", "10001", "11110", "10100", "10010", "10001"),
+    'S': ("01111", "10000", "01110", "00001", "00001", "10001", "01110"),
+    'T': ("11111", "00100", "00100", "00100", "00100", "00100", "00100"),
+    'U': ("10001", "10001", "10001", "10001", "10001", "10001", "01110"),
+    'V': ("10001", "10001", "10001", "10001", "01010", "01010", "00100"),
+    'W': ("10001", "10001", "10001", "10101", "10101", "11011", "10001"),
+    '&': ("01100", "10010", "01100", "10101", "10010", "10010", "01101"),
+}
+
+
+def _ui_draw_text(buf, x0, y0, text, color, scale=3):
+    h, w, _ = buf.shape
+    cx = int(x0)
+    for ch in text:
+        glyph = _FONT_5X7.get(ch.upper(), _FONT_5X7[' '])
+        for r, row in enumerate(glyph):
+            for c, bit in enumerate(row):
+                if bit == '1':
+                    yy0 = max(0, int(y0) + r * scale)
+                    yy1 = min(h, yy0 + scale)
+                    xx0 = max(0, cx + c * scale)
+                    xx1 = min(w, xx0 + scale)
+                    buf[yy0:yy1, xx0:xx1, :3] = color
+        cx += 6 * scale
+
+
+def _ui_draw_line(buf, x0, y0, x1, y1, color, width=2):
+    h, w, _ = buf.shape
+    n = max(2, int(math.hypot(x1 - x0, y1 - y0) * 2))
+    ts = np.linspace(0.0, 1.0, n)
+    xs = np.round(x0 + (x1 - x0) * ts).astype(np.int32)
+    ys = np.round(y0 + (y1 - y0) * ts).astype(np.int32)
+    r = max(0, width // 2)
+    for dx in range(-r, r + 1):
+        for dy in range(-r, r + 1):
+            px = np.clip(xs + dx, 0, w - 1)
+            py = np.clip(ys + dy, 0, h - 1)
+            buf[py, px, :3] = color
+
+
+def _pack_ui_image(name, buf_topdown):
+    """Создаёт bpy.data.images из float32 буфера (H,W,4) top-down и упаковывает в .blend."""
+    h, w, _ = buf_topdown.shape
+    img = bpy.data.images.get(name)
+    if img is not None:
+        bpy.data.images.remove(img)
+    img = bpy.data.images.new(name, width=w, height=h, alpha=False)
+    img.colorspace_settings.name = 'sRGB'
+    img.pixels.foreach_set(np.ascontiguousarray(buf_topdown[::-1, :, :]).ravel())
+    img.pack()
+    return img
+
+
+def _build_cluster_ui_image():
+    """Процедурная 12.3" OLED-графика приборной панели Volvo S90 (768×256):
+    спидометр 72 км/ч, центральная карта Pilot Assist, знак 80, тахометр 2.1 rpm."""
+    w, h = 768, 256
+    buf = np.zeros((h, w, 4), dtype=np.float32)
+    buf[:, :, 3] = 1.0
+    yy, xx = np.mgrid[0:h, 0:w]
+    # Глубокий ночной скандинавский OLED-фон
+    grad = yy / float(h)
+    buf[:, :, 0] = 0.015 + 0.015 * (1.0 - grad)
+    buf[:, :, 1] = 0.032 + 0.035 * (1.0 - grad)
+    buf[:, :, 2] = 0.068 + 0.060 * (1.0 - grad)
+
+    def _draw_dial(cx, cy, r_out, val_frac, red_from=None):
+        dist = np.hypot(xx - cx, yy - cy)
+        # Тёмное внутреннее поле шкалы + тонкая голубовато-серебристая окантовка
+        buf[dist < r_out, :3] = (0.010, 0.018, 0.034)
+        ring = (dist >= r_out - 4.0) & (dist <= r_out)
+        buf[ring, :3] = (0.28, 0.42, 0.58)
+        # Угол по часовой стрелке от 135° (низ-лево) до 405° (низ-право) — диапазон 270°
+        ang = (np.degrees(np.arctan2(yy - cy, xx - cx)) + 360.0) % 360.0
+        rel = (ang - 135.0) % 360.0
+        # Активная голубая дуга прогресса
+        arc_m = (dist >= r_out - 15.0) & (dist <= r_out - 7.0) & (rel <= 270.0 * val_frac)
+        buf[arc_m, :3] = (0.14, 0.62, 0.96)
+        if red_from is not None:
+            red_m = (
+                (dist >= r_out - 16.0) & (dist <= r_out - 6.0)
+                & (rel >= 270.0 * red_from) & (rel <= 270.0)
+            )
+            buf[red_m, :3] = (0.95, 0.12, 0.10)
+        # 25 радиальных рисок
+        for k in range(25):
+            a_rad = math.radians(135.0 + 270.0 * k / 24.0)
+            r0 = r_out - (20.0 if k % 4 == 0 else 12.0)
+            r1 = r_out - 4.0
+            col = (0.95, 0.18, 0.14) if (red_from and k / 24.0 >= red_from) else (0.86, 0.92, 0.98)
+            _ui_draw_line(
+                buf,
+                cx + r0 * math.cos(a_rad), cy + r0 * math.sin(a_rad),
+                cx + r1 * math.cos(a_rad), cy + r1 * math.sin(a_rad),
+                col, width=3 if k % 4 == 0 else 1,
+            )
+        # Светящаяся рубиново-красная стрелка Volvo
+        a_n = math.radians(135.0 + 270.0 * val_frac)
+        _ui_draw_line(
+            buf,
+            cx - 10.0 * math.cos(a_n), cy - 10.0 * math.sin(a_n),
+            cx + (r_out - 16.0) * math.cos(a_n), cy + (r_out - 16.0) * math.sin(a_n),
+            (1.0, 0.14, 0.10), width=4,
+        )
+        buf[dist < 11.0, :3] = (0.16, 0.22, 0.30)
+
+    # Левый циферблат: Спидометр (72 км/ч)
+    _draw_dial(156, 130, 102, 0.28)
+    _ui_draw_text(buf, 118, 104, "72", (0.96, 0.98, 1.0), scale=6)
+    _ui_draw_text(buf, 124, 158, "KM/H", (0.55, 0.72, 0.88), scale=2)
+
+    # Правый циферблат: Тахометр (2.1 rpm, красная зона с 0.78)
+    _draw_dial(612, 130, 102, 0.26, red_from=0.78)
+    _ui_draw_text(buf, 570, 108, "2.1", (0.96, 0.98, 1.0), scale=5)
+    _ui_draw_text(buf, 586, 158, "RPM", (0.55, 0.72, 0.88), scale=2)
+
+    # Центральная зона: 3D-карта Pilot Assist / Navigation
+    buf[24:224, 286:482, :3] = (0.018, 0.042, 0.088)
+    # 3D-перспектива трассы и светящийся голубой маршрут
+    for row_y in range(55, 215):
+        t = (row_y - 55) / 160.0
+        half_rd = int(12 + 64 * t)
+        half_ln = max(2, int(4 + 10 * t))
+        buf[row_y, 384 - half_rd:384 + half_rd, :3] = (0.045, 0.085, 0.145)
+        buf[row_y, 384 - half_ln:384 + half_ln, :3] = (0.12, 0.65, 0.98)
+    # Белые линии разметки полосы
+    _ui_draw_line(buf, 372, 55, 322, 214, (0.75, 0.86, 0.96), width=2)
+    _ui_draw_line(buf, 396, 55, 446, 214, (0.75, 0.86, 0.96), width=2)
+    # Знак ограничения скорости "80" в правом верхнем углу центральной зоны
+    d_sign = np.hypot(xx - 454, yy - 54)
+    buf[d_sign <= 22.0, :3] = (0.95, 0.12, 0.10)
+    buf[d_sign <= 16.0, :3] = (0.96, 0.97, 0.98)
+    _ui_draw_text(buf, 442, 47, "80", (0.05, 0.05, 0.07), scale=2)
+    # Нижняя строка статуса: передача "D" и температура
+    _ui_draw_text(buf, 376, 228, "D", (0.20, 0.92, 0.56), scale=3)
+    _ui_draw_text(buf, 296, 232, "21°C", (0.68, 0.78, 0.88), scale=2)
+    _ui_draw_text(buf, 424, 232, "12:45", (0.68, 0.78, 0.88), scale=2)
+    return _pack_ui_image('Cluster_UI_Tex', buf)
+
+
+def _build_sensus_ui_image():
+    """Процедурная 9" вертикальная OLED-графика Volvo Sensus Connect (512×640):
+    статус-бар, ночная навигационная карта, плеер B&W, телефон, двухзонный климат."""
+    w, h = 512, 640
+    buf = np.zeros((h, w, 4), dtype=np.float32)
+    buf[:, :, 3] = 1.0
+    yy, xx = np.mgrid[0:h, 0:w]
+    buf[:, :, 0] = 0.018
+    buf[:, :, 1] = 0.030
+    buf[:, :, 2] = 0.052
+
+    # 1. Статус-бар сверху (0..44)
+    buf[0:44, :, :3] = (0.012, 0.020, 0.036)
+    _ui_draw_text(buf, 18, 13, "12:45", (0.92, 0.95, 1.0), scale=3)
+    _ui_draw_text(buf, 198, 15, "VOLVO", (0.52, 0.66, 0.82), scale=2)
+    # Полоски сигнала 4G справа
+    for kb in range(4):
+        bh = 6 + kb * 4
+        buf[30 - bh:30, 446 + kb * 10:452 + kb * 10, :3] = (0.30, 0.78, 1.0)
+
+    # 2. Плитка 1: Ночная навигационная карта (50..274)
+    buf[50:274, 14:498, :3] = (0.024, 0.054, 0.105)
+    # Изогнутая река/вода на карте
+    river = np.abs((xx - 340) - 45.0 * np.sin(yy / 42.0)) < 28.0
+    buf[(yy >= 50) & (yy < 274) & (xx >= 14) & (xx < 498) & river, :3] = (0.035, 0.125, 0.245)
+    # Сетка улиц и магистралей
+    for gx in range(40, 490, 58):
+        _ui_draw_line(buf, gx, 52, gx + 14, 272, (0.065, 0.12, 0.20), width=2)
+    for gy in range(74, 268, 44):
+        _ui_draw_line(buf, 16, gy, 496, gy - 10, (0.065, 0.12, 0.20), width=2)
+    # Яркий маршрут Volvo Navigation (бирюзово-голубая линия + поворот направо)
+    _ui_draw_line(buf, 224, 268, 224, 148, (0.12, 0.78, 1.0), width=8)
+    _ui_draw_line(buf, 224, 148, 398, 128, (0.12, 0.78, 1.0), width=8)
+    # Белый курсор автомобиля на маршруте
+    d_car = np.hypot(xx - 224, yy - 214)
+    buf[d_car <= 13.0, :3] = (0.12, 0.78, 1.0)
+    buf[d_car <= 8.0, :3] = (0.98, 0.99, 1.0)
+    # Верхняя подсказка маневра (450M)
+    buf[58:102, 24:204, :3] = (0.015, 0.032, 0.062)
+    _ui_draw_text(buf, 40, 70, "450M", (0.96, 0.98, 1.0), scale=3)
+
+    # 3. Плитка 2: Медиа / Bowers & Wilkins (286..406)
+    buf[286:406, 14:498, :3] = (0.030, 0.046, 0.074)
+    # Квадратная мини-обложка альбома слева
+    buf[302:390, 30:118, :3] = (0.14, 0.34, 0.56)
+    d_alb = np.hypot(xx - 74, yy - 346)
+    buf[(d_alb <= 30.0) & (yy >= 302) & (yy < 390), :3] = (0.85, 0.62, 0.24)
+    buf[d_alb <= 10.0, :3] = (0.03, 0.05, 0.08)
+    # Заголовок, полоса прогресса и кнопки плеера
+    _ui_draw_text(buf, 138, 304, "B&W SOUND", (0.92, 0.95, 0.98), scale=3)
+    buf[344:350, 138:468, :3] = (0.10, 0.16, 0.24)
+    buf[344:350, 138:342, :3] = (0.18, 0.70, 1.0)
+    buf[340:354, 338:348, :3] = (0.96, 0.98, 1.0)
+    # Иконки управления: ◄◄  ❚❚  ►►
+    buf[368:390, 268:276, :3] = (0.92, 0.95, 1.0)
+    buf[368:390, 282:290, :3] = (0.92, 0.95, 1.0)
+    _ui_draw_line(buf, 224, 379, 240, 369, (0.72, 0.80, 0.90), width=3)
+    _ui_draw_line(buf, 224, 379, 240, 389, (0.72, 0.80, 0.90), width=3)
+    _ui_draw_line(buf, 334, 379, 318, 369, (0.72, 0.80, 0.90), width=3)
+    _ui_draw_line(buf, 334, 379, 318, 389, (0.72, 0.80, 0.90), width=3)
+
+    # 4. Плитка 3: Drive Mode / Автомобиль (418..518)
+    buf[418:518, 14:498, :3] = (0.026, 0.042, 0.068)
+    _ui_draw_text(buf, 32, 434, "COMFORT", (0.86, 0.92, 0.98), scale=3)
+    # 3 активные плитки-переключатели справа
+    for k_t, col_t in enumerate(((0.14, 0.64, 0.96), (0.18, 0.78, 0.50), (0.16, 0.24, 0.36))):
+        tx0 = 266 + k_t * 74
+        buf[438:496, tx0:tx0 + 62, :3] = col_t
+        buf[462:472, tx0 + 16:tx0 + 46, :3] = (0.95, 0.98, 1.0)
+
+    # 5. Нижняя полоса климат-контроля (530..634)
+    buf[530:634, 0:512, :3] = (0.014, 0.022, 0.038)
+    _ui_draw_text(buf, 24, 558, "21.5°", (0.96, 0.98, 1.0), scale=4)
+    _ui_draw_text(buf, 358, 558, "22.0°", (0.96, 0.98, 1.0), scale=4)
+    # Иконка вентилятора по центру + индикаторы обогрева (красный) и обдува (синий)
+    d_fan = np.hypot(xx - 256, yy - 580)
+    buf[(d_fan >= 16.0) & (d_fan <= 22.0), :3] = (0.60, 0.76, 0.94)
+    buf[d_fan <= 7.0, :3] = (0.92, 0.96, 1.0)
+    buf[604:616, 48:116, :3] = (0.94, 0.28, 0.14)
+    buf[604:616, 396:464, :3] = (0.16, 0.66, 0.98)
+    return _pack_ui_image('Sensus_UI_Tex', buf)
+
+
+def _mat_oled_image(name, image, emission_strength=1.55):
+    """Глянцевый OLED-дисплей с упакованной растровой графикой и защитным стеклом."""
+    m = bpy.data.materials.new(name)
     m.use_nodes = True
     nt = m.node_tree
-    bsdf = _bsdf_base(m, (0.012, 0.022, 0.042), 0.05, 0.05, coat=1.0, coat_rough=0.02)
+    bsdf = _bsdf_base(m, (0.01, 0.015, 0.025), 0.04, 0.04, coat=1.0, coat_rough=0.015)
     tc = nt.nodes.new('ShaderNodeTexCoord')
-    sep = nt.nodes.new('ShaderNodeSeparateXYZ')
-    mrange = nt.nodes.new('ShaderNodeMapRange')
-    mrange.inputs['From Min'].default_value = 0.70
-    mrange.inputs['From Max'].default_value = 0.92
-    _, fac_in, a_in, b_in, col_out = _new_mix_rgba(nt, blend_type='MIX', fac=0.5)
-    a_in.default_value = (0.025, 0.075, 0.16, 1.0)
-    b_in.default_value = (0.11, 0.28, 0.48, 1.0)
-    nt.links.new(tc.outputs['Object'], sep.inputs['Vector'])
-    nt.links.new(sep.outputs['Z'], mrange.inputs['Value'])
-    nt.links.new(mrange.outputs['Result'], fac_in)
+    tex = nt.nodes.new('ShaderNodeTexImage')
+    tex.image = image
+    tex.extension = 'CLIP'
+    nt.links.new(tc.outputs['UV'], tex.inputs['Vector'])
+    nt.links.new(tex.outputs['Color'], bsdf.inputs['Base Color'])
     if 'Emission Color' in bsdf.inputs:
-        nt.links.new(col_out, bsdf.inputs['Emission Color'])
-        bsdf.inputs['Emission Strength'].default_value = 1.10
+        nt.links.new(tex.outputs['Color'], bsdf.inputs['Emission Color'])
+        bsdf.inputs['Emission Strength'].default_value = emission_strength
     return m
+
+
+def mat_screen_ui():
+    """9" вертикальный OLED-дисплей Volvo Sensus Connect с реальной UI-графикой."""
+    return _mat_oled_image('Screen_Sensus_UI', _build_sensus_ui_image(), emission_strength=1.35)
+
+
+def mat_cluster_ui():
+    """12.3" цифровая приборная панель Volvo с приборами и картой Pilot Assist."""
+    return _mat_oled_image('Cluster_Digital_UI', _build_cluster_ui_image(), emission_strength=1.55)
 
 
 def make_materials():
@@ -812,10 +1136,12 @@ def make_materials():
         'lens': mat_lens(),
         'rubber': mat_rubber(),
         'leather': mat_leather('Leather_Seat', (0.055, 0.050, 0.048), scale=10.0, roughness=0.56),
-        'leather_light': mat_leather('Leather_Bolster', (0.095, 0.088, 0.082),
-                                     scale=12.0, roughness=0.52),
+        'leather_light': mat_leather_perforated(
+            'Leather_Bolster', (0.105, 0.098, 0.090), roughness=0.50,
+        ),
         'wood': mat_wood(),
         'screen_ui': mat_screen_ui(),
+        'cluster_ui': mat_cluster_ui(),
         'carpet': mat_leather('Carpet', (0.025, 0.022, 0.020), scale=42.0, roughness=0.85),
         'headliner': mat_leather('Headliner_Fabric', (0.085, 0.080, 0.075),
                                  scale=55.0, roughness=0.90),
@@ -2344,11 +2670,16 @@ def build_wheel(tag, axle_x, side, mats, collection, body_ob=None):
     bm_rim.faces.ensure_lookup_table()
     for f_idx in range(n_before_cap, len(bm_rim.faces)):
         bm_rim.faces[f_idx].material_index = 1
-    # Хромированное колечко вокруг колпачка + 5 объёмных колёсных гаек (slot 2 = Chrome)
+    # Хромированное колечко вокруг колпачка, эмблема Iron Mark и 5 колёсных гаек (slot 2)
     n_before_lugs = len(bm_rim.faces)
     y_ring0 = side * (hw * 0.50)
     y_ring1 = side * (hw * 0.57)
     _add_y_annulus(bm_rim, 0.032, 0.038, min(y_ring0, y_ring1), max(y_ring0, y_ring1), seg=24)
+    # Хромированное мини-кольцо и поперечина Volvo Iron Mark на центральном колпачке ступицы
+    y_em0 = side * (hw * 0.555)
+    y_em1 = side * (hw * 0.574)
+    _add_y_annulus(bm_rim, 0.015, 0.019, min(y_em0, y_em1), max(y_em0, y_em1), seg=20)
+    add_box(bm_rim, -0.020, +0.020, min(y_em0, y_em1), max(y_em0, y_em1), -0.0035, +0.0035)
     y_lug0 = side * (hw * 0.44)
     y_lug1 = side * (hw * 0.55)
     for k_lug in range(5):
@@ -2545,11 +2876,32 @@ def _build_steering_wheel(mats, collection):
     # Нижняя сдвоенная спица (две боковые ветви + нижняя перемычка)
     add_box(bm, -0.012, +0.012, -0.034, -0.014, -(r_maj - r_min - 0.002), -0.066)
     add_box(bm, -0.012, +0.012, +0.014, +0.034, -(r_maj - r_min - 0.002), -0.066)
+    # Глянцево-чёрная подложка знака Volvo Iron Mark на ступице руля (slot 1 = Piano_Black)
+    _add_x_cylinder(bm, 0.018, -0.0355, -0.032, seg=20, center_yz=(0.0, 0.0))
     n_pb1 = len(bm.faces)
 
-    # 4. Хромированные акценты Volvo: кольцо эмблемы Iron Mark, диагональ и декор нижней спицы
-    _add_x_cylinder(bm, 0.020, -0.036, -0.033, seg=20, center_yz=(0.0, 0.0))
-    add_box(bm, -0.037, -0.0335, -0.036, +0.036, -0.004, +0.004)
+    # 4. Хромированные акценты Volvo: двухслойный 3D Iron Mark (кольцо + лента + стрела)
+    seg_sw = 20
+    r_sw_in, r_sw_out = 0.0175, 0.0225
+    sw_ring = []
+    for k_sw in range(seg_sw):
+        ang = 2.0 * math.pi * k_sw / seg_sw
+        ca, sa = math.cos(ang), math.sin(ang)
+        sw_ring.append([
+            bm.verts.new(Vector((-0.0325, r_sw_in * ca, r_sw_in * sa))),
+            bm.verts.new(Vector((-0.0375, r_sw_in * ca, r_sw_in * sa))),
+            bm.verts.new(Vector((-0.0375, r_sw_out * ca, r_sw_out * sa))),
+            bm.verts.new(Vector((-0.0325, r_sw_out * ca, r_sw_out * sa))),
+        ])
+    for k_sw in range(seg_sw):
+        r0, r1 = sw_ring[k_sw], sw_ring[(k_sw + 1) % seg_sw]
+        for kk in range(4):
+            kn = (kk + 1) % 4
+            bm.faces.new((r0[kk], r0[kn], r1[kn], r1[kk]))
+    # Поперечина VOLVO + стрела Марса вверх-вправо (при взгляде водителя по +X право это -Y!)
+    add_box(bm, -0.038, -0.033, -0.025, +0.025, -0.0042, +0.0042)
+    add_box(bm, -0.0375, -0.033, -0.024, -0.014, +0.015, +0.020)
+    add_box(bm, -0.0375, -0.033, -0.024, -0.019, +0.009, +0.0142)
     # Хромированная окантовка нижней спицы и кнопок
     add_box(bm, -0.016, -0.0125, -0.036, +0.036, -(r_maj - r_min + 0.004), -(r_maj - r_min - 0.014))
     for sy_s in (-1.0, +1.0):
@@ -2616,6 +2968,10 @@ def build_interior(mats, collection, door_objs=None):
         # Контурная центральная подушка (лёгкий наклон к спинке) + передний валик под колени
         _add_tapered_block(bm_bol, -0.05, 0.33, -0.05, 0.33,
                            yc - 0.155, yc + 0.155, yc - 0.155, yc + 0.155, 0.365, 0.485)
+        # Поперечная стёжка подушки сиденья (3 мягких валика перфорированной кожи Nappa)
+        for sx_q in (0.04, 0.14, 0.24):
+            add_box(bm_bol, sx_q - 0.036, sx_q + 0.036,
+                    yc - 0.148, yc + 0.148, 0.482, 0.493)
         add_box(bm_bol, 0.335, 0.455, yc - 0.155, yc + 0.155, 0.375, 0.495)
         # Обхватывающие боковые валики подушки (основная кожа Cabin)
         add_box(bm, -0.04, 0.44, yc - 0.232, yc - 0.160, 0.365, 0.525)
@@ -2748,27 +3104,44 @@ def build_interior(mats, collection, door_objs=None):
     uv_box(dt_ob, scale=3.0)
     objs.append(dt_ob)
 
-    # 4c. Цифровая приборная панель 12.3" (Instrument_Cluster) на лицевой грани торпеды за рулём
+    # 4c. Цифровая приборная панель 12.3" (Instrument_Cluster) с реальной OLED-графикой!
     bm_ic = bmesh.new()
     # Чёрная глянцевая рамка-ниша приборки (slot 0 = Piano_Black)
     add_box(bm_ic, 0.594, 0.635, +0.195, +0.535, 0.808, 0.942)
     n_ic_ui0 = len(bm_ic.faces)
-    # OLED-дисплей приборной панели (slot 1 = Screen_Sensus_UI)
+    # OLED-дисплей приборной панели (slot 1 = Cluster_Digital_UI)
     add_box(bm_ic, 0.588, 0.593, +0.208, +0.522, 0.820, 0.930)
     n_ic_ui1 = len(bm_ic.faces)
-    # Два тонких хромированных кольца виртуальных шкал спидометра и тахометра (slot 2 = Chrome)
-    for y_dial in (+0.275, +0.455):
-        _add_x_cylinder(bm_ic, 0.042, 0.583, 0.5875, seg=24, center_yz=(y_dial, 0.875))
+    # Два полых хромированных 3D-ободка точно вокруг шкал спидометра и тахометра (slot 2)
+    for y_dial in (+0.458, +0.272):
+        seg_d = 28
+        r_di, r_do = 0.0415, 0.0455
+        d_ring = []
+        for kd in range(seg_d):
+            ang = 2.0 * math.pi * kd / seg_d
+            ca, sa = math.cos(ang), math.sin(ang)
+            d_ring.append([
+                bm_ic.verts.new(Vector((0.5875, y_dial + r_di * ca, 0.875 + r_di * sa))),
+                bm_ic.verts.new(Vector((0.5835, y_dial + r_di * ca, 0.875 + r_di * sa))),
+                bm_ic.verts.new(Vector((0.5835, y_dial + r_do * ca, 0.875 + r_do * sa))),
+                bm_ic.verts.new(Vector((0.5875, y_dial + r_do * ca, 0.875 + r_do * sa))),
+            ])
+        for kd in range(seg_d):
+            r0, r1 = d_ring[kd], d_ring[(kd + 1) % seg_d]
+            for kk in range(4):
+                kn = (kk + 1) % 4
+                bm_ic.faces.new((r0[kk], r0[kn], r1[kn], r1[kk]))
     bm_ic.faces.ensure_lookup_table()
     for fi in range(n_ic_ui0, n_ic_ui1):
         bm_ic.faces[fi].material_index = 1
     for fi in range(n_ic_ui1, len(bm_ic.faces)):
         bm_ic.faces[fi].material_index = 2
     ic_ob = bmesh_to_object('Instrument_Cluster', bm_ic, material=mats['piano_black'],
-                            smooth=True, collection=collection, bevel=0.002, bevel_segs=1)
-    ic_ob.data.materials.append(mats['screen_ui'])
+                            smooth=True, collection=collection, bevel=0.0015, bevel_segs=1)
+    ic_ob.data.materials.append(mats['cluster_ui'])
     ic_ob.data.materials.append(mats['chrome'])
     uv_box(ic_ob, scale=3.0)
+    uv_face_x_minus(ic_ob, 1, +0.522, +0.208, 0.820, 0.930)
     objs.append(ic_ob)
 
     # 4d. Центральный вертикальный планшет Volvo Sensus 9" + панель кнопок и крутилка громкости
@@ -2793,10 +3166,11 @@ def build_interior(mats, collection, door_objs=None):
     for fi in range(n_sc_ui1, len(bm_sc.faces)):
         bm_sc.faces[fi].material_index = 2
     screen = bmesh_to_object('Screen', bm_sc, material=mats['piano_black'],
-                             smooth=True, collection=collection, bevel=0.0025, bevel_segs=1)
+                             smooth=True, collection=collection, bevel=0.0020, bevel_segs=1)
     screen.data.materials.append(mats['screen_ui'])
     screen.data.materials.append(mats['chrome'])
     uv_box(screen, scale=2.0)
+    uv_face_x_minus(screen, 1, +0.092, -0.092, 0.708, 0.904)
     objs.append(screen)
 
     # 4e. 4 фирменных вертикальных дефлектора обдува Volvo (2 у Sensus + 2 по краям торпеды)
@@ -2922,6 +3296,63 @@ def build_interior(mats, collection, door_objs=None):
         mats['headliner'], collection, uv_scale=2.0,
     )
     objs.append(headliner)
+
+    # 8b. Ремни безопасности (Seatbelts) на стойках B и C + замки с красными кнопками у консоли
+    bm_sb = bmesh.new()
+    # Тканевые ленты ремней (slot 0 = Rubber / матовая стропа)
+    for sy_b in (-1.0, +1.0):
+        # Передний ремень вдоль внутренней грани стойки B (от верхнего регулятора к катушке)
+        y_top_b = sy_b * 0.715
+        y_bot_b = sy_b * 0.745
+        p_front = [
+            Vector((-0.070, y_top_b, 1.135)),
+            Vector((-0.072, y_top_b + sy_b * 0.015, 0.760)),
+            Vector((-0.068, y_bot_b, 0.340)),
+        ]
+        _sweep_rect_tube(bm_sb, p_front, half_y=0.0035, half_n=0.022)
+        # Задний ремень вдоль внутренней панели стойки C
+        p_rear = [
+            Vector((-0.895, sy_b * 0.625, 0.960)),
+            Vector((-0.875, sy_b * 0.660, 0.520)),
+        ]
+        _sweep_rect_tube(bm_sb, p_rear, half_y=0.0035, half_n=0.020)
+    # Корпуса замков ремней между передними креслами и центральным тоннелем (slot 1 = Piano_Black)
+    n_sb_pb0 = len(bm_sb.faces)
+    for sy_b in (-1.0, +1.0):
+        yb_k = sy_b * 0.145
+        add_box(bm_sb, +0.02, +0.095, yb_k - 0.014, yb_k + 0.014, 0.455, 0.525)
+        add_box(bm_sb, +0.04, +0.075, yb_k - 0.006, yb_k + 0.006, 0.360, 0.454)
+        # Чёрный корпус накладки-регулятора на стойке B и держатель язычка
+        y_top_b = sy_b * 0.718
+        add_box(bm_sb, -0.098, -0.044, y_top_b - 0.012, y_top_b + 0.012, 1.118, 1.158)
+        y_tng = sy_b * 0.728
+        add_box(bm_sb, -0.094, -0.050, y_tng - 0.011, y_tng + 0.011, 0.725, 0.768)
+    n_sb_pb1 = len(bm_sb.faces)
+    # Хромированные проушины регуляторов и металлические язычки пряжек (slot 2 = Chrome)
+    for sy_b in (-1.0, +1.0):
+        y_top_b = sy_b * 0.706
+        add_box(bm_sb, -0.092, -0.050, y_top_b - 0.006, y_top_b + 0.006, 1.124, 1.148)
+        y_tng = sy_b * 0.715
+        add_box(bm_sb, -0.088, -0.056, y_tng - 0.005, y_tng + 0.005, 0.692, 0.726)
+    n_sb_chr1 = len(bm_sb.faces)
+    # Красные кнопки PRESS на замках ремней безопасности (slot 3 = Caliper)
+    for sy_b in (-1.0, +1.0):
+        yb_k = sy_b * 0.145
+        add_box(bm_sb, +0.032, +0.082, yb_k - 0.011, yb_k + 0.011, 0.525, 0.538)
+    bm_sb.faces.ensure_lookup_table()
+    for fi in range(n_sb_pb0, n_sb_pb1):
+        bm_sb.faces[fi].material_index = 1
+    for fi in range(n_sb_pb1, n_sb_chr1):
+        bm_sb.faces[fi].material_index = 2
+    for fi in range(n_sb_chr1, len(bm_sb.faces)):
+        bm_sb.faces[fi].material_index = 3
+    sb_ob = bmesh_to_object('Seatbelts', bm_sb, material=mats['rubber'],
+                            smooth=True, collection=collection, bevel=0.0015, bevel_segs=1)
+    sb_ob.data.materials.append(mats['piano_black'])
+    sb_ob.data.materials.append(mats['chrome'])
+    sb_ob.data.materials.append(mats['caliper'])
+    uv_box(sb_ob, scale=6.0)
+    objs.append(sb_ob)
 
     # 9. Многослойные внутренние дверные карты (кожа + шпон Linear Walnut + кнопки + хром-ручка)
     door_map = {ob.name: ob for ob in (door_objs or [])}

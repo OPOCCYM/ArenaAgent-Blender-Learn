@@ -68,6 +68,7 @@ def test_collections_and_bounding_box(built_scene_dir):
         'Door_Handle_Base_Rear_Left', 'Door_Handle_Base_Rear_Right',
         'Center_Console', 'Dash_Trim', 'Instrument_Cluster', 'Air_Vents',
         'Steering_Column', 'Pedals', 'Interior_Roof_Details', 'Cabin_Seats_Insert',
+        'Seatbelts',
         'PDC_Sensors_Front', 'Headlight_Washers', 'PDC_Sensors_Rear', 'Trunk_Badge',
         'Mirror_L', 'Mirror_R',
         'Hood_Lid', 'Engine_Bay', 'Engine_Metal', 'Coolant_Tank',
@@ -135,6 +136,10 @@ def test_collections_and_bounding_box(built_scene_dir):
                      'Rear_Reflector_L', 'Rear_Reflector_R', 'PDC_Sensors_Rear'):
         assert bpy.data.objects[rb_child].parent.name == 'Rear_Bumper'
     assert bpy.data.objects['Trunk_Badge'].parent.name == 'Trunk_Lid'
+    # Упакованные OLED-текстуры приборной панели 12.3" и планшета Sensus 9" в .blend
+    for img_name in ('Cluster_UI_Tex', 'Sensus_UI_Tex'):
+        img = bpy.data.images.get(img_name)
+        assert img is not None and img.packed_file is not None, f'Не упакована текстура {img_name}'
     # Дверные ручки полностью отделены от дверей и имеют собственный origin в шарнире ручки
     for d_tag in ('Front_Left', 'Front_Right', 'Rear_Left', 'Rear_Right'):
         hdl = bpy.data.objects[f'Door_Handle_{d_tag}']
