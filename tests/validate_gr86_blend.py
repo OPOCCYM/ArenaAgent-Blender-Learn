@@ -23,6 +23,10 @@ grid=bpy.data.objects.get('Front_Grille_Honeycomb')
 assert grid and len(grid.data.polygons)>=250, 'open OEM grille honeycomb geometry missing'
 for name in ('Front_Grille','Front_Grille_Honeycomb','Front_Splitter','Headlamp_Bezel_1','Headlamp_DRL_1'):
     assert bpy.data.objects[name].parent==front_bumper, f'{name} should move with front bumper'
+for name in ('Fender_Garnish_Base_1','Fender_Garnish_Rib_1_1','Side_Marker_Lens_1'):
+    assert bpy.data.objects[name].parent==bpy.data.objects['Front_Fender_L'], f'{name} should move with left front fender'
+for name in ('Fuel_Filler_Recess','Fuel_Filler_Door','Fuel_Filler_Hinge','Fuel_Filler_Notch'):
+    assert bpy.data.objects[name].parent==bpy.data.objects['Rear_Quarter_L'], f'{name} should move with rear quarter panel'
 for name in ('Rear_Diffuser','Rear_Plate','TailLamp_1','Exhaust_Tip_1'):
     assert bpy.data.objects[name].parent==rear_bumper, f'{name} should move with rear bumper'
 for name in ('Hood_Panel','Trunk_Lid','Roof_Panel','Front_Bumper','Rear_Bumper','Door_L','Door_R','Front_Fender_L','Front_Fender_R','Rear_Quarter_L','Rear_Quarter_R'):

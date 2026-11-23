@@ -146,7 +146,7 @@ def generate(path):
     o.material('Tire_Rubber',(.018,.02,.023),0,.84); o.material('Graphite_Alloy',(.68,.70,.73),.82,.24)
     o.material('Brake_Metal',(.24,.24,.23),.65,.38); o.material('Lamp_White',(.94,.97,1.0),.1,.15)
     o.material('Lamp_Red',(.6,.015,.012),.1,.2)
-    o.material('Grille_Mesh',(.075,.09,.105),.72,.36)
+    o.material('Grille_Mesh',(.075,.09,.105),.72,.36); o.material('Marker_Amber',(.92,.24,.018),.18,.26)
     sections=[(-2.132,.62,-.11),(-1.88,.76,-.04),(-1.42,.85,.015),(-.90,.88,.035),(-.38,.82,0),(.30,.82,0),(.88,.87,-.015),(1.45,.86,.005),(1.90,.77,-.015),(2.132,.62,-.075)]
     profile=[(-.96,.43),(-.995,.50),(-1.0,.67),(-.975,.77),(-.93,.87),(-.84,.915),(-.63,.94),(0,.95),(.63,.94),(.84,.915),(.93,.87),(.975,.77),(1.0,.67),(.995,.50),(.96,.43),(.55,.43),(0,.43),(-.55,.43)]
     o.use('Pearl_White'); o.loft('Body_Blockout',sections,profile)
@@ -183,7 +183,13 @@ def generate(path):
         o.box('Door_Gap_Bottom_'+str(side),(0,side*.855,.535),(1.40,.004,.004))
         o.use('Pearl_White')
         o.box('Side_Skirt_'+str(side),(.12,side*.855,.49),(1.42,.018,.05))
-        o.use('Graphite_Alloy'); o.box('Front_Fender_Vent_'+str(side),(-1.03,side*.850,.735),(.105,.004,.032))
+        # Small separate OEM fender garnish: dark inset, three machined ribs and amber repeater.
+        o.use('Tire_Rubber'); o.box('Fender_Garnish_Base_'+str(side),(-1.035,side*.860,.735),(.180,.014,.062))
+        o.use('Graphite_Alloy')
+        for rib in range(3):
+            o.box(f'Fender_Garnish_Rib_{side}_{rib}',(-1.035,side*.870,.716+rib*.018),(.142,.007,.005))
+        o.use('Tire_Rubber'); o.box('Side_Marker_Bezel_'+str(side),(-1.035,side*.862,.682),(.132,.008,.028))
+        o.use('Marker_Amber'); o.box('Side_Marker_Lens_'+str(side),(-1.035,side*.868,.682),(.108,.004,.016))
     # Broad, inset hexagonal GR86-style lower grille with a dark mesh backing.
     o.use('Tire_Rubber')
     grille=[(-.43,.69),(-.34,.755),(.34,.755),(.43,.69),(.37,.545),(-.37,.545)]
@@ -233,6 +239,11 @@ def generate(path):
         o.use('Tire_Rubber'); o.mesh('TailLamp_Bezel_'+str(side),[(2.139,side*y,z) for y,z in outer],[tuple(range(6))])
         inner=[(.40,.813),(.46,.840),(.69,.824),(.745,.790),(.71,.762),(.46,.769)]
         o.use('Lamp_Red'); o.mesh('TailLamp_'+str(side),[(2.150,side*y,z) for y,z in inner],[tuple(range(6))])
+    # Separate left-rear fuel-filler surround and painted door, as on the road car.
+    o.use('Tire_Rubber'); o.box('Fuel_Filler_Recess', (1.48,.872,.735),(.168,.012,.142))
+    o.use('Pearl_White'); o.box('Fuel_Filler_Door', (1.48,.881,.735),(.142,.010,.116))
+    o.use('Graphite_Alloy'); o.box('Fuel_Filler_Hinge', (1.425,.887,.783),(.035,.006,.006))
+    o.use('Tire_Rubber'); o.box('Fuel_Filler_Notch', (1.535,.888,.735),(.012,.006,.028))
     # Approximate four wheels; independent named groups and axle-aligned geometry.
     for axle,x in [('Front',-1.2875),('Rear',1.2875)]:
         for side in (-1,1):

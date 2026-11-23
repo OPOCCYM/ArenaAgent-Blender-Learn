@@ -526,7 +526,7 @@ def build_bumper_assemblies(vehicle):
     """Keep bumper-mounted optics, grille, plate and diffuser attached to their fascia."""
     bpy.context.view_layer.update()
     groups={
-        'Front_Bumper':('Front_Grille','Grille_Slat_','Front_Badge','Headlamp_Bezel_',
+        'Front_Bumper':('Front_Grille','Front_Grille_Honeycomb','Grille_Slat_','Front_Badge','Headlamp_Bezel_',
                         'Headlamp_Lens_','Headlamp_Projector_','Headlamp_Outer_Optic_','Headlamp_DRL_','Front_Splitter'),
         'Rear_Bumper':('TailLamp_','Rear_Plate','Plate_Glyph_','Exhaust_Tip_','Rear_Diffuser','Diffuser_Fin_'),
     }
@@ -538,6 +538,20 @@ def build_bumper_assemblies(vehicle):
             if any(obj.name.startswith(prefix) for prefix in prefixes):
                 obj.parent=bumper
                 obj.matrix_parent_inverse=bumper.matrix_world.inverted()
+    # Side markers and fender garnish belong to the removable front fender skins.
+    for side,letter in ((1,'L'),(-1,'R')):
+        fender=bpy.data.objects[f'Front_Fender_{letter}']
+        for obj in list(vehicle.objects):
+            if obj.parent is None and any(obj.name.startswith(prefix) for prefix in (
+                f'Fender_Garnish_Base_{side}', f'Fender_Garnish_Rib_{side}_',
+                f'Side_Marker_Bezel_{side}', f'Side_Marker_Lens_{side}', f'Front_Fender_Vent_{side}')):
+                obj.parent=fender; obj.matrix_parent_inverse=fender.matrix_world.inverted()
+    # The left-rear fuel flap remains attached to its independently removable quarter panel.
+    quarter=bpy.data.objects['Rear_Quarter_L']
+    for name in ('Fuel_Filler_Recess','Fuel_Filler_Door','Fuel_Filler_Hinge','Fuel_Filler_Notch'):
+        obj=bpy.data.objects.get(name)
+        if obj:
+            obj.parent=quarter; obj.matrix_parent_inverse=quarter.matrix_world.inverted()
     gap_mat=material('Bumper_Panel_Gap',(.008,.012,.016),.04,.58)
     seam_paths={
         'Front_Bumper_Gap':('Front_Bumper',[(-1.824,.79,.48),(-1.824,.80,.64),(-1.824,.72,.79),
